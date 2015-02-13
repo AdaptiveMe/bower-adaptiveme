@@ -1,0 +1,36 @@
+{
+  "name": "adaptive",
+  "description": "The Adaptive Runtime Platform (ARP) provides native containers for Hybrid Apps.",
+  "main": [
+    "adaptive.js"
+  ],
+  "license": "Apache-2.0",
+  "keywords": [
+    "adaptive",
+    "hybrid",
+    "html5",
+    "mobile",
+    "desktop",
+    "framework"
+  ],
+  "authors": [
+    {
+      "name": "Carlos Lozano",
+      "email": "carlos@adaptive.me",
+      "homepage": "https://github.com/carloslozano"
+    }
+  ],
+  "homepage": "http://adaptiveme.github.io/adaptive-arp-javascript/docs/latest/",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/AdaptiveMe/adaptive-arp-javascript.git"
+  },
+  "ignore": [
+    "/.*",
+    ".DS_Store",
+    ".git",
+    ".gitignore",
+    ".editorconfig",
+    "README.md"
+  ]
+}
