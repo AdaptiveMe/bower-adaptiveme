@@ -1,5 +1,5 @@
 {
-  "name": "adaptive",
+  "name": "adaptiveme",
   "description": "The Adaptive Runtime Platform (ARP) provides native containers for Hybrid Apps.",
   "main": [
     "adaptive.js"
