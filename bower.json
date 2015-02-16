@@ -31,6 +31,7 @@
     ".git",
     ".gitignore",
     ".editorconfig",
-    "README.md"
+    "README.md",
+    "bower.json"
   ]
 }
