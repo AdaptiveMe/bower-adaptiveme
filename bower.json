@@ -32,6 +32,7 @@
     ".gitignore",
     ".editorconfig",
     "README.md",
-    "bower.json"
+    "bower.json",
+    ".travis.yml"
   ]
 }

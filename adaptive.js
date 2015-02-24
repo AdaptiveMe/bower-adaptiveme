@@ -1,5 +1,5 @@
 var __extends = this.__extends || function (d, b) {
-    for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
+    for (var p in b) { if (b.hasOwnProperty(p)) { d[p] = b[p]; } }
     function __() { this.constructor = d; }
     __.prototype = b.prototype;
     d.prototype = new __();
@@ -33,7 +33,7 @@ Contributors:
 
 Release:
 
-    * @version v2.1.5
+    * @version v2.2.0
 
 -------------------------------------------| aut inveniam viam aut faciam |--------------------------------------------
 */
@@ -48,9 +48,15 @@ var Adaptive;
     /**
        @private
        @property {string} bridgePath
-       Base url for for http/https JSON requests.
+       Base url used internally to POST and intercept JSON requests by the platform.
     */
     Adaptive.bridgePath = "https://adaptiveapp";
+    /**
+       @private
+       @property {string} bridgeApiVersion
+       The Adaptive Runtime Platform API specification version.
+    */
+    Adaptive.bridgeApiVersion = "v2.2.0";
     /**
        @private
        @class Adaptive.Dictionary
@@ -77,6 +83,10 @@ var Adaptive;
             this._values.splice(index, 1);
             delete this[key];
         };
+        Dictionary.prototype.removeAll = function () {
+            this._keys = new Array();
+            this._values = new Array();
+        };
         Dictionary.prototype.keys = function () {
             return this._keys;
         };
@@ -95,6 +105,139 @@ var Adaptive;
         return Dictionary;
     })();
     Adaptive.Dictionary = Dictionary;
+    /**
+       @private
+       @param {Adaptive.APIRequest} apiRequest the request to be processed.
+       @param {Adaptive.IBaseListener} listener to add or remove from the dictionary or null if removing all listeners.
+       @param {Adaptive.Dictionary} listenerDictionary dictionary of listeners for the operation.
+       @since v2.1.10
+       Send request for methods that manage listeners.
+    */
+    function postRequestListener(apiRequest, listener, listenerDictionary) {
+        apiRequest.setApiVersion(Adaptive.bridgeApiVersion);
+        var apiResponse = new APIResponse("", 200, "");
+        // Create and send JSON request.
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", Adaptive.bridgePath, false);
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+        if (apiRequest.getMethodName().indexOf("add") > -1) {
+            // Add listener reference to local dictionary.
+            listenerDictionary.add("" + listener.getId(), listener);
+        }
+        xhr.send(JSON.stringify(apiRequest));
+        // Check response.
+        if (xhr.status === 200) {
+            if (xhr.responseText != null && xhr.responseText !== '') {
+                apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
+                if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                    manageRequestListener(apiRequest, listener, listenerDictionary, false);
+                }
+                else {
+                    manageRequestListener(apiRequest, listener, listenerDictionary, true);
+                    console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' [" + apiResponse.getStatusMessage() + "].");
+                }
+            }
+            else {
+                manageRequestListener(apiRequest, listener, listenerDictionary, true);
+                console.error("ERROR: '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' incorrect response received.");
+            }
+        }
+        else {
+            manageRequestListener(apiRequest, listener, listenerDictionary, true);
+            console.error("ERROR: " + xhr.status + " sending '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' request.");
+        }
+    }
+    Adaptive.postRequestListener = postRequestListener;
+    function manageRequestListener(apiRequest, listener, listenerDictionary, isError) {
+        if (apiRequest.getMethodName().indexOf("remove") > -1 && apiRequest.getMethodName().indexOf("Listeners") === -1) {
+            listenerDictionary.remove("" + listener.getId());
+        }
+        else if (apiRequest.getMethodName().indexOf("remove") > -1 && apiRequest.getMethodName().indexOf("Listeners") > -1) {
+            listenerDictionary.removeAll();
+        }
+        else if (isError && apiRequest.getMethodName().indexOf("add") > -1) {
+            listenerDictionary.remove("" + listener.getId());
+        }
+    }
+    Adaptive.manageRequestListener = manageRequestListener;
+    /**
+       @private
+       @param {Adaptive.APIRequest} apiRequest the request to be processed.
+       @param {Adaptive.IBaseCallback} callback to receive responses.
+       @param {Adaptive.Dictionary} callbackDictionary dictionary of callbacks for the operation.
+       @since v2.1.10
+       Send request for methods that use callbacks.
+    */
+    function postRequestCallback(apiRequest, callback, callbackDictionary) {
+        apiRequest.setApiVersion(Adaptive.bridgeApiVersion);
+        var apiResponse = new APIResponse("", 200, "");
+        // Create and send JSON request.
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", Adaptive.bridgePath, false);
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+        // Add callback reference to local dictionary.
+        callbackDictionary.add("" + callback.getId(), callback);
+        xhr.send(JSON.stringify(apiRequest));
+        // Check response.
+        if (xhr.status === 200) {
+            if (xhr.responseText != null && xhr.responseText !== '') {
+                apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
+                if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                }
+                else {
+                    // Remove callback reference from local dictionary due to invalid response.
+                    callbackDictionary.remove("" + callback.getId());
+                    console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' [" + apiResponse.getStatusMessage() + "].");
+                }
+            }
+            else {
+                // Remove callback reference from local dictionary due to invalid response.
+                callbackDictionary.remove("" + callback.getId());
+                console.error("ERROR: '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' incorrect response received.");
+            }
+        }
+        else {
+            // Unknown error - remove from dictionary.
+            callbackDictionary.remove("" + callback.getId());
+            console.error("ERROR: " + xhr.status + " sending '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' request.");
+        }
+    }
+    Adaptive.postRequestCallback = postRequestCallback;
+    /**
+       @private
+       @param {Adaptive.APIRequest} apiRequest the request to be processed.
+       @return {Adaptive.APIResponse} Response to the request.
+       @since v2.1.10
+       Send request and receives responses synchronously.
+    */
+    function postRequest(apiRequest) {
+        apiRequest.setApiVersion(Adaptive.bridgeApiVersion);
+        var apiResponse = new APIResponse("", 200, "");
+        // Create and send JSON request.
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", Adaptive.bridgePath, false);
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+        xhr.send(JSON.stringify(apiRequest));
+        // Check response.
+        if (xhr.status === 200) {
+            if (xhr.responseText != null && xhr.responseText !== '') {
+                apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
+                if (apiResponse != null && apiResponse.getStatusCode() !== 200) {
+                    console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' [" + apiResponse.getStatusMessage() + "].");
+                }
+            }
+            else {
+                apiResponse = new APIResponse("", 400, "");
+                console.error("ERROR: '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' incorrect response received.");
+            }
+        }
+        else {
+            apiResponse = new APIResponse("", xhr.status, "");
+            console.error("ERROR: " + xhr.status + " sending '" + apiRequest.getBridgeType() + "." + apiRequest.getMethodName() + "' request.");
+        }
+        return apiResponse;
+    }
+    Adaptive.postRequest = postRequest;
     /**
        @class Adaptive.APIBean
        Structure representing a native response to the HTML5
@@ -121,7 +264,25 @@ var Adaptive;
         */
         APIBean.toObject = function (object) {
             var result = new APIBean();
+            if (object != null) {
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.APIBean[].
+           @return {Adaptive.APIBean[]} Wrapped object array instance.
+        */
+        APIBean.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(APIBean.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return APIBean;
     })();
@@ -329,24 +490,37 @@ listener.
         */
         APIRequest.toObject = function (object) {
             var result = new APIRequest(null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.bridgeType != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.bridgeType = object.bridgeType;
-            if (object != null && object.methodName != null)
                 result.methodName = object.methodName;
-            if (object != null && object.parameters != null) {
-                result.parameters = new Array();
-                for (var i = 0; i < object.parameters.length; i++) {
-                    var __value__ = object.parameters[i];
-                    if (__value__ != null)
-                        result.parameters.push(__value__);
+                if (object.parameters != null) {
+                    result.parameters = new Array();
+                    for (var iparameters = 0; iparameters < object.parameters.length; iparameters++) {
+                        var vparameters = object.parameters[iparameters];
+                        result.parameters.push(vparameters);
+                    }
+                }
+                result.asyncId = object.asyncId;
+                result.apiVersion = object.apiVersion;
+            }
+            return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.APIRequest[].
+           @return {Adaptive.APIRequest[]} Wrapped object array instance.
+        */
+        APIRequest.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(APIRequest.toObject(object[i]));
                 }
             }
-            if (object != null && object.asyncId != null)
-                result.asyncId = object.asyncId;
-            if (object != null && object.apiVersion != null)
-                result.apiVersion = object.apiVersion;
-            return result;
+            return resultArray;
         };
         return APIRequest;
     })();
@@ -479,14 +653,29 @@ listener.
         */
         APIResponse.toObject = function (object) {
             var result = new APIResponse(null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.response != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.response = object.response;
-            if (object != null && object.statusCode != null)
                 result.statusCode = object.statusCode;
-            if (object != null && object.statusMessage != null)
                 result.statusMessage = object.statusMessage;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.APIResponse[].
+           @return {Adaptive.APIResponse[]} Wrapped object array instance.
+        */
+        APIResponse.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(APIResponse.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return APIResponse;
     })();
@@ -772,28 +961,39 @@ listener.
         */
         AppResourceData.toObject = function (object) {
             var result = new AppResourceData(null, null, null, null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.id != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.id = object.id;
-            if (object != null && object.data != null) {
-                result.data = new Array();
-                for (var i = 0; i < object.data.length; i++) {
-                    var __value__ = object.data[i];
-                    if (__value__ != null)
-                        result.data.push(__value__);
+                if (object.data != null) {
+                    result.data = new Array();
+                    for (var idata = 0; idata < object.data.length; idata++) {
+                        var vdata = object.data[idata];
+                        result.data.push(vdata);
+                    }
+                }
+                result.rawType = object.rawType;
+                result.rawLength = object.rawLength;
+                result.cooked = object.cooked;
+                result.cookedType = object.cookedType;
+                result.cookedLength = object.cookedLength;
+            }
+            return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.AppResourceData[].
+           @return {Adaptive.AppResourceData[]} Wrapped object array instance.
+        */
+        AppResourceData.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(AppResourceData.toObject(object[i]));
                 }
             }
-            if (object != null && object.rawType != null)
-                result.rawType = object.rawType;
-            if (object != null && object.rawLength != null)
-                result.rawLength = object.rawLength;
-            if (object != null && object.cooked != null)
-                result.cooked = object.cooked;
-            if (object != null && object.cookedType != null)
-                result.cookedType = object.cookedType;
-            if (object != null && object.cookedLength != null)
-                result.cookedLength = object.cookedLength;
-            return result;
+            return resultArray;
         };
         return AppResourceData;
     })();
@@ -896,22 +1096,28 @@ listener.
         */
         Service.toObject = function (object) {
             var result = new Service(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.serviceEndpoints != null) {
-                result.serviceEndpoints = new Array();
-                for (var i = 0; i < object.serviceEndpoints.length; i++) {
-                    var __value__ = object.serviceEndpoints[i];
-                    if (__value__ != null) {
-                        result.serviceEndpoints.push(ServiceEndpoint.toObject(__value__));
-                    }
-                    else {
-                        result.serviceEndpoints.push(ServiceEndpoint.toObject(null));
-                    }
+            if (object != null) {
+                // Assign values to bean fields.
+                result.serviceEndpoints = ServiceEndpoint.toObjectArray(object.serviceEndpoints);
+                result.name = object.name;
+            }
+            return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Service[].
+           @return {Adaptive.Service[]} Wrapped object array instance.
+        */
+        Service.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Service.toObject(object[i]));
                 }
             }
-            if (object != null && object.name != null)
-                result.name = object.name;
-            return result;
+            return resultArray;
         };
         return Service;
     })();
@@ -1048,28 +1254,29 @@ listener.
         */
         ServiceEndpoint.toObject = function (object) {
             var result = new ServiceEndpoint(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.validationType != null) {
+            if (object != null) {
+                // Assign values to bean fields.
                 result.validationType = IServiceCertificateValidation.toObject(object.validationType);
-            }
-            else {
-                result.validationType = IServiceCertificateValidation.toObject(null);
-            }
-            if (object != null && object.hostURI != null)
                 result.hostURI = object.hostURI;
-            if (object != null && object.paths != null) {
-                result.paths = new Array();
-                for (var i = 0; i < object.paths.length; i++) {
-                    var __value__ = object.paths[i];
-                    if (__value__ != null) {
-                        result.paths.push(ServicePath.toObject(__value__));
-                    }
-                    else {
-                        result.paths.push(ServicePath.toObject(null));
-                    }
-                }
+                result.paths = ServicePath.toObjectArray(object.paths);
             }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceEndpoint[].
+           @return {Adaptive.ServiceEndpoint[]} Wrapped object array instance.
+        */
+        ServiceEndpoint.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceEndpoint.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServiceEndpoint;
     })();
@@ -1208,28 +1415,35 @@ listener.
         */
         ServicePath.toObject = function (object) {
             var result = new ServicePath(null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.path != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.path = object.path;
-            if (object != null && object.methods != null) {
-                result.methods = new Array();
-                for (var i = 0; i < object.methods.length; i++) {
-                    var __value__ = object.methods[i];
-                    if (__value__ != null) {
-                        result.methods.push(IServiceMethod.toObject(__value__));
-                    }
-                    else {
-                        result.methods.push(IServiceMethod.toObject(null));
+                if (object.methods != null) {
+                    result.methods = new Array();
+                    for (var imethods = 0; imethods < object.methods.length; imethods++) {
+                        var vmethods = object.methods[imethods];
+                        result.methods.push(IServiceMethod.toObject(vmethods));
                     }
                 }
-            }
-            if (object != null && object.type != null) {
                 result.type = IServiceType.toObject(object.type);
             }
-            else {
-                result.type = IServiceType.toObject(null);
-            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServicePath[].
+           @return {Adaptive.ServicePath[]} Wrapped object array instance.
+        */
+        ServicePath.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServicePath.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServicePath;
     })();
@@ -1407,16 +1621,30 @@ listener.
         */
         Acceleration.toObject = function (object) {
             var result = new Acceleration(null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.x != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.x = object.x;
-            if (object != null && object.y != null)
                 result.y = object.y;
-            if (object != null && object.z != null)
                 result.z = object.z;
-            if (object != null && object.timestamp != null)
                 result.timestamp = object.timestamp;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Acceleration[].
+           @return {Adaptive.Acceleration[]} Wrapped object array instance.
+        */
+        Acceleration.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Acceleration.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return Acceleration;
     })(APIBean);
@@ -1486,14 +1714,27 @@ listener.
         */
         Button.toObject = function (object) {
             var result = new Button(null);
-            // Assign values to bean fields.
-            if (object != null && object.type != null) {
+            if (object != null) {
+                // Assign values to bean fields.
                 result.type = ICapabilitiesButton.toObject(object.type);
             }
-            else {
-                result.type = ICapabilitiesButton.toObject(null);
-            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Button[].
+           @return {Adaptive.Button[]} Wrapped object array instance.
+        */
+        Button.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Button.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return Button;
     })(APIBean);
@@ -1599,16 +1840,28 @@ listener.
         */
         ContactAddress.toObject = function (object) {
             var result = new ContactAddress(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.address != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.address = object.address;
-            if (object != null && object.type != null) {
                 result.type = ContactAddressType.toObject(object.type);
             }
-            else {
-                result.type = ContactAddressType.toObject(null);
-            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactAddress[].
+           @return {Adaptive.ContactAddress[]} Wrapped object array instance.
+        */
+        ContactAddress.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactAddress.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactAddress;
     })(APIBean);
@@ -1750,18 +2003,29 @@ listener.
         */
         ContactEmail.toObject = function (object) {
             var result = new ContactEmail(null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.type != null) {
+            if (object != null) {
+                // Assign values to bean fields.
                 result.type = ContactEmailType.toObject(object.type);
-            }
-            else {
-                result.type = ContactEmailType.toObject(null);
-            }
-            if (object != null && object.primary != null)
                 result.primary = object.primary;
-            if (object != null && object.email != null)
                 result.email = object.email;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactEmail[].
+           @return {Adaptive.ContactEmail[]} Wrapped object array instance.
+        */
+        ContactEmail.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactEmail.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactEmail;
     })(APIBean);
@@ -1939,20 +2203,30 @@ listener.
         */
         ContactPersonalInfo.toObject = function (object) {
             var result = new ContactPersonalInfo(null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.name != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.name = object.name;
-            if (object != null && object.middleName != null)
                 result.middleName = object.middleName;
-            if (object != null && object.lastName != null)
                 result.lastName = object.lastName;
-            if (object != null && object.title != null) {
                 result.title = ContactPersonalInfoTitle.toObject(object.title);
             }
-            else {
-                result.title = ContactPersonalInfoTitle.toObject(null);
-            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactPersonalInfo[].
+           @return {Adaptive.ContactPersonalInfo[]} Wrapped object array instance.
+        */
+        ContactPersonalInfo.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactPersonalInfo.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactPersonalInfo;
     })(APIBean);
@@ -2058,16 +2332,28 @@ listener.
         */
         ContactPhone.toObject = function (object) {
             var result = new ContactPhone(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.phone != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.phone = object.phone;
-            if (object != null && object.phoneType != null) {
                 result.phoneType = ContactPhoneType.toObject(object.phoneType);
             }
-            else {
-                result.phoneType = ContactPhoneType.toObject(null);
-            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactPhone[].
+           @return {Adaptive.ContactPhone[]} Wrapped object array instance.
+        */
+        ContactPhone.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactPhone.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactPhone;
     })(APIBean);
@@ -2209,14 +2495,29 @@ listener.
         */
         ContactProfessionalInfo.toObject = function (object) {
             var result = new ContactProfessionalInfo(null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.company != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.company = object.company;
-            if (object != null && object.jobTitle != null)
                 result.jobTitle = object.jobTitle;
-            if (object != null && object.jobDescription != null)
                 result.jobDescription = object.jobDescription;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactProfessionalInfo[].
+           @return {Adaptive.ContactProfessionalInfo[]} Wrapped object array instance.
+        */
+        ContactProfessionalInfo.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactProfessionalInfo.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactProfessionalInfo;
     })(APIBean);
@@ -2322,16 +2623,28 @@ listener.
         */
         ContactSocial.toObject = function (object) {
             var result = new ContactSocial(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.socialNetwork != null) {
+            if (object != null) {
+                // Assign values to bean fields.
                 result.socialNetwork = ContactSocialNetwork.toObject(object.socialNetwork);
-            }
-            else {
-                result.socialNetwork = ContactSocialNetwork.toObject(null);
-            }
-            if (object != null && object.profileUrl != null)
                 result.profileUrl = object.profileUrl;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactSocial[].
+           @return {Adaptive.ContactSocial[]} Wrapped object array instance.
+        */
+        ContactSocial.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactSocial.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactSocial;
     })(APIBean);
@@ -2437,12 +2750,28 @@ listener.
         */
         ContactTag.toObject = function (object) {
             var result = new ContactTag(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.tagName != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.tagName = object.tagName;
-            if (object != null && object.tagValue != null)
                 result.tagValue = object.tagValue;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactTag[].
+           @return {Adaptive.ContactTag[]} Wrapped object array instance.
+        */
+        ContactTag.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactTag.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactTag;
     })(APIBean);
@@ -2512,10 +2841,27 @@ listener.
         */
         ContactUid.toObject = function (object) {
             var result = new ContactUid(null);
-            // Assign values to bean fields.
-            if (object != null && object.contactId != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.contactId = object.contactId;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactUid[].
+           @return {Adaptive.ContactUid[]} Wrapped object array instance.
+        */
+        ContactUid.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactUid.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactUid;
     })(APIBean);
@@ -2585,10 +2931,27 @@ listener.
         */
         ContactWebsite.toObject = function (object) {
             var result = new ContactWebsite(null);
-            // Assign values to bean fields.
-            if (object != null && object.url != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.url = object.url;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ContactWebsite[].
+           @return {Adaptive.ContactWebsite[]} Wrapped object array instance.
+        */
+        ContactWebsite.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ContactWebsite.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ContactWebsite;
     })(APIBean);
@@ -2694,12 +3057,28 @@ listener.
         */
         Database.toObject = function (object) {
             var result = new Database(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.name != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.name = object.name;
-            if (object != null && object.compress != null)
                 result.compress = object.compress;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Database[].
+           @return {Adaptive.Database[]} Wrapped object array instance.
+        */
+        Database.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Database.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return Database;
     })(APIBean);
@@ -2769,10 +3148,27 @@ listener.
         */
         DatabaseColumn.toObject = function (object) {
             var result = new DatabaseColumn(null);
-            // Assign values to bean fields.
-            if (object != null && object.name != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.name = object.name;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.DatabaseColumn[].
+           @return {Adaptive.DatabaseColumn[]} Wrapped object array instance.
+        */
+        DatabaseColumn.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(DatabaseColumn.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return DatabaseColumn;
     })(APIBean);
@@ -2842,16 +3238,33 @@ listener.
         */
         DatabaseRow.toObject = function (object) {
             var result = new DatabaseRow(null);
-            // Assign values to bean fields.
-            if (object != null && object.values != null) {
-                result.values = new Array();
-                for (var i = 0; i < object.values.length; i++) {
-                    var __value__ = object.values[i];
-                    if (__value__ != null)
-                        result.values.push(__value__);
+            if (object != null) {
+                // Assign values to bean fields.
+                if (object.values != null) {
+                    result.values = new Array();
+                    for (var ivalues = 0; ivalues < object.values.length; ivalues++) {
+                        var vvalues = object.values[ivalues];
+                        result.values.push(vvalues);
+                    }
                 }
             }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.DatabaseRow[].
+           @return {Adaptive.DatabaseRow[]} Wrapped object array instance.
+        */
+        DatabaseRow.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(DatabaseRow.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return DatabaseRow;
     })(APIBean);
@@ -3065,38 +3478,31 @@ listener.
         */
         DatabaseTable.toObject = function (object) {
             var result = new DatabaseTable(null, null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.name != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.name = object.name;
-            if (object != null && object.columnCount != null)
                 result.columnCount = object.columnCount;
-            if (object != null && object.rowCount != null)
                 result.rowCount = object.rowCount;
-            if (object != null && object.databaseColumns != null) {
-                result.databaseColumns = new Array();
-                for (var i = 0; i < object.databaseColumns.length; i++) {
-                    var __value__ = object.databaseColumns[i];
-                    if (__value__ != null) {
-                        result.databaseColumns.push(DatabaseColumn.toObject(__value__));
-                    }
-                    else {
-                        result.databaseColumns.push(DatabaseColumn.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.databaseRows != null) {
-                result.databaseRows = new Array();
-                for (var i = 0; i < object.databaseRows.length; i++) {
-                    var __value__ = object.databaseRows[i];
-                    if (__value__ != null) {
-                        result.databaseRows.push(DatabaseRow.toObject(__value__));
-                    }
-                    else {
-                        result.databaseRows.push(DatabaseRow.toObject(null));
-                    }
-                }
+                result.databaseColumns = DatabaseColumn.toObjectArray(object.databaseColumns);
+                result.databaseRows = DatabaseRow.toObjectArray(object.databaseRows);
             }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.DatabaseTable[].
+           @return {Adaptive.DatabaseTable[]} Wrapped object array instance.
+        */
+        DatabaseTable.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(DatabaseTable.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return DatabaseTable;
     })(APIBean);
@@ -3273,16 +3679,30 @@ be unique for a specific instance of an application on a specific device.
         */
         DeviceInfo.toObject = function (object) {
             var result = new DeviceInfo(null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.name != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.name = object.name;
-            if (object != null && object.model != null)
                 result.model = object.model;
-            if (object != null && object.vendor != null)
                 result.vendor = object.vendor;
-            if (object != null && object.uuid != null)
                 result.uuid = object.uuid;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.DeviceInfo[].
+           @return {Adaptive.DeviceInfo[]} Wrapped object array instance.
+        */
+        DeviceInfo.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(DeviceInfo.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return DeviceInfo;
     })(APIBean);
@@ -3568,62 +3988,33 @@ be unique for a specific instance of an application on a specific device.
         */
         Email.toObject = function (object) {
             var result = new Email(null, null, null, null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.toRecipients != null) {
-                result.toRecipients = new Array();
-                for (var i = 0; i < object.toRecipients.length; i++) {
-                    var __value__ = object.toRecipients[i];
-                    if (__value__ != null) {
-                        result.toRecipients.push(EmailAddress.toObject(__value__));
-                    }
-                    else {
-                        result.toRecipients.push(EmailAddress.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.ccRecipients != null) {
-                result.ccRecipients = new Array();
-                for (var i = 0; i < object.ccRecipients.length; i++) {
-                    var __value__ = object.ccRecipients[i];
-                    if (__value__ != null) {
-                        result.ccRecipients.push(EmailAddress.toObject(__value__));
-                    }
-                    else {
-                        result.ccRecipients.push(EmailAddress.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.bccRecipients != null) {
-                result.bccRecipients = new Array();
-                for (var i = 0; i < object.bccRecipients.length; i++) {
-                    var __value__ = object.bccRecipients[i];
-                    if (__value__ != null) {
-                        result.bccRecipients.push(EmailAddress.toObject(__value__));
-                    }
-                    else {
-                        result.bccRecipients.push(EmailAddress.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.emailAttachmentData != null) {
-                result.emailAttachmentData = new Array();
-                for (var i = 0; i < object.emailAttachmentData.length; i++) {
-                    var __value__ = object.emailAttachmentData[i];
-                    if (__value__ != null) {
-                        result.emailAttachmentData.push(EmailAttachmentData.toObject(__value__));
-                    }
-                    else {
-                        result.emailAttachmentData.push(EmailAttachmentData.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.messageBody != null)
+            if (object != null) {
+                // Assign values to bean fields.
+                result.toRecipients = EmailAddress.toObjectArray(object.toRecipients);
+                result.ccRecipients = EmailAddress.toObjectArray(object.ccRecipients);
+                result.bccRecipients = EmailAddress.toObjectArray(object.bccRecipients);
+                result.emailAttachmentData = EmailAttachmentData.toObjectArray(object.emailAttachmentData);
                 result.messageBody = object.messageBody;
-            if (object != null && object.messageBodyMimeType != null)
                 result.messageBodyMimeType = object.messageBodyMimeType;
-            if (object != null && object.subject != null)
                 result.subject = object.subject;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Email[].
+           @return {Adaptive.Email[]} Wrapped object array instance.
+        */
+        Email.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Email.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return Email;
     })(APIBean);
@@ -3693,10 +4084,27 @@ be unique for a specific instance of an application on a specific device.
         */
         EmailAddress.toObject = function (object) {
             var result = new EmailAddress(null);
-            // Assign values to bean fields.
-            if (object != null && object.address != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.address = object.address;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.EmailAddress[].
+           @return {Adaptive.EmailAddress[]} Wrapped object array instance.
+        */
+        EmailAddress.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(EmailAddress.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return EmailAddress;
     })(APIBean);
@@ -3910,24 +4318,37 @@ be unique for a specific instance of an application on a specific device.
         */
         EmailAttachmentData.toObject = function (object) {
             var result = new EmailAttachmentData(null, null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.data != null) {
-                result.data = new Array();
-                for (var i = 0; i < object.data.length; i++) {
-                    var __value__ = object.data[i];
-                    if (__value__ != null)
-                        result.data.push(__value__);
+            if (object != null) {
+                // Assign values to bean fields.
+                if (object.data != null) {
+                    result.data = new Array();
+                    for (var idata = 0; idata < object.data.length; idata++) {
+                        var vdata = object.data[idata];
+                        result.data.push(vdata);
+                    }
+                }
+                result.size = object.size;
+                result.fileName = object.fileName;
+                result.mimeType = object.mimeType;
+                result.referenceUrl = object.referenceUrl;
+            }
+            return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.EmailAttachmentData[].
+           @return {Adaptive.EmailAttachmentData[]} Wrapped object array instance.
+        */
+        EmailAttachmentData.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(EmailAttachmentData.toObject(object[i]));
                 }
             }
-            if (object != null && object.size != null)
-                result.size = object.size;
-            if (object != null && object.fileName != null)
-                result.fileName = object.fileName;
-            if (object != null && object.mimeType != null)
-                result.mimeType = object.mimeType;
-            if (object != null && object.referenceUrl != null)
-                result.referenceUrl = object.referenceUrl;
-            return result;
+            return resultArray;
         };
         return EmailAttachmentData;
     })(APIBean);
@@ -4134,20 +4555,32 @@ doesn't exist, this will be -1. Used internally.
         */
         FileDescriptor.toObject = function (object) {
             var result = new FileDescriptor();
-            // Assign values to bean fields.
-            if (object != null && object.name != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.name = object.name;
-            if (object != null && object.path != null)
                 result.path = object.path;
-            if (object != null && object.pathAbsolute != null)
                 result.pathAbsolute = object.pathAbsolute;
-            if (object != null && object.dateCreated != null)
                 result.dateCreated = object.dateCreated;
-            if (object != null && object.dateModified != null)
                 result.dateModified = object.dateModified;
-            if (object != null && object.size != null)
                 result.size = object.size;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.FileDescriptor[].
+           @return {Adaptive.FileDescriptor[]} Wrapped object array instance.
+        */
+        FileDescriptor.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(FileDescriptor.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return FileDescriptor;
     })(APIBean);
@@ -4393,20 +4826,32 @@ doesn't exist, this will be -1. Used internally.
         */
         Geolocation.toObject = function (object) {
             var result = new Geolocation(null, null, null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.latitude != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.latitude = object.latitude;
-            if (object != null && object.longitude != null)
                 result.longitude = object.longitude;
-            if (object != null && object.altitude != null)
                 result.altitude = object.altitude;
-            if (object != null && object.xDoP != null)
                 result.xDoP = object.xDoP;
-            if (object != null && object.yDoP != null)
                 result.yDoP = object.yDoP;
-            if (object != null && object.timestamp != null)
                 result.timestamp = object.timestamp;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Geolocation[].
+           @return {Adaptive.Geolocation[]} Wrapped object array instance.
+        */
+        Geolocation.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Geolocation.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return Geolocation;
     })(APIBean);
@@ -4512,12 +4957,28 @@ doesn't exist, this will be -1. Used internally.
         */
         KeyPair.toObject = function (object) {
             var result = new KeyPair(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.keyName != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.keyName = object.keyName;
-            if (object != null && object.keyValue != null)
                 result.keyValue = object.keyValue;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.KeyPair[].
+           @return {Adaptive.KeyPair[]} Wrapped object array instance.
+        */
+        KeyPair.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(KeyPair.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return KeyPair;
     })(APIBean);
@@ -4623,12 +5084,28 @@ doesn't exist, this will be -1. Used internally.
         */
         KeyValue.toObject = function (object) {
             var result = new KeyValue(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.keyName != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.keyName = object.keyName;
-            if (object != null && object.keyData != null)
                 result.keyData = object.keyData;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.KeyValue[].
+           @return {Adaptive.KeyValue[]} Wrapped object array instance.
+        */
+        KeyValue.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(KeyValue.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return KeyValue;
     })(APIBean);
@@ -4709,14 +5186,27 @@ doesn't exist, this will be -1. Used internally.
         */
         Lifecycle.toObject = function (object) {
             var result = new Lifecycle(null);
-            // Assign values to bean fields.
-            if (object != null && object.state != null) {
+            if (object != null) {
+                // Assign values to bean fields.
                 result.state = LifecycleState.toObject(object.state);
             }
-            else {
-                result.state = LifecycleState.toObject(null);
-            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Lifecycle[].
+           @return {Adaptive.Lifecycle[]} Wrapped object array instance.
+        */
+        Lifecycle.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Lifecycle.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return Lifecycle;
     })(APIBean);
@@ -4822,12 +5312,28 @@ doesn't exist, this will be -1. Used internally.
         */
         Locale.toObject = function (object) {
             var result = new Locale(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.country != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.country = object.country;
-            if (object != null && object.language != null)
                 result.language = object.language;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Locale[].
+           @return {Adaptive.Locale[]} Wrapped object array instance.
+        */
+        Locale.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Locale.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return Locale;
     })(APIBean);
@@ -4966,18 +5472,29 @@ doesn't exist, this will be -1. Used internally.
         */
         OSInfo.toObject = function (object) {
             var result = new OSInfo(null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.name != null) {
+            if (object != null) {
+                // Assign values to bean fields.
                 result.name = IOSType.toObject(object.name);
-            }
-            else {
-                result.name = IOSType.toObject(null);
-            }
-            if (object != null && object.version != null)
                 result.version = object.version;
-            if (object != null && object.vendor != null)
                 result.vendor = object.vendor;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.OSInfo[].
+           @return {Adaptive.OSInfo[]} Wrapped object array instance.
+        */
+        OSInfo.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(OSInfo.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return OSInfo;
     })(APIBean);
@@ -5161,28 +5678,30 @@ doesn't exist, this will be -1. Used internally.
         */
         RotationEvent.toObject = function (object) {
             var result = new RotationEvent(null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.origin != null) {
+            if (object != null) {
+                // Assign values to bean fields.
                 result.origin = ICapabilitiesOrientation.toObject(object.origin);
-            }
-            else {
-                result.origin = ICapabilitiesOrientation.toObject(null);
-            }
-            if (object != null && object.destination != null) {
                 result.destination = ICapabilitiesOrientation.toObject(object.destination);
-            }
-            else {
-                result.destination = ICapabilitiesOrientation.toObject(null);
-            }
-            if (object != null && object.state != null) {
                 result.state = RotationEventState.toObject(object.state);
-            }
-            else {
-                result.state = RotationEventState.toObject(null);
-            }
-            if (object != null && object.timestamp != null)
                 result.timestamp = object.timestamp;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.RotationEvent[].
+           @return {Adaptive.RotationEvent[]} Wrapped object array instance.
+        */
+        RotationEvent.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(RotationEvent.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return RotationEvent;
     })(APIBean);
@@ -5288,12 +5807,28 @@ doesn't exist, this will be -1. Used internally.
         */
         SecureKeyPair.toObject = function (object) {
             var result = new SecureKeyPair(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.secureKey != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.secureKey = object.secureKey;
-            if (object != null && object.secureData != null)
                 result.secureData = object.secureData;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.SecureKeyPair[].
+           @return {Adaptive.SecureKeyPair[]} Wrapped object array instance.
+        */
+        SecureKeyPair.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(SecureKeyPair.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return SecureKeyPair;
     })(APIBean);
@@ -5717,72 +6252,37 @@ doesn't exist, this will be -1. Used internally.
         */
         ServiceRequest.toObject = function (object) {
             var result = new ServiceRequest(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.userAgent != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.userAgent = object.userAgent;
-            if (object != null && object.content != null)
                 result.content = object.content;
-            if (object != null && object.contentType != null)
                 result.contentType = object.contentType;
-            if (object != null && object.contentEncoding != null) {
                 result.contentEncoding = IServiceContentEncoding.toObject(object.contentEncoding);
-            }
-            else {
-                result.contentEncoding = IServiceContentEncoding.toObject(null);
-            }
-            if (object != null && object.contentLength != null)
                 result.contentLength = object.contentLength;
-            if (object != null && object.serviceHeaders != null) {
-                result.serviceHeaders = new Array();
-                for (var i = 0; i < object.serviceHeaders.length; i++) {
-                    var __value__ = object.serviceHeaders[i];
-                    if (__value__ != null) {
-                        result.serviceHeaders.push(ServiceHeader.toObject(__value__));
-                    }
-                    else {
-                        result.serviceHeaders.push(ServiceHeader.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.serviceSession != null) {
+                result.serviceHeaders = ServiceHeader.toObjectArray(object.serviceHeaders);
                 result.serviceSession = ServiceSession.toObject(object.serviceSession);
-            }
-            else {
-                result.serviceSession = ServiceSession.toObject(null);
-            }
-            if (object != null && object.queryParameters != null) {
-                result.queryParameters = new Array();
-                for (var i = 0; i < object.queryParameters.length; i++) {
-                    var __value__ = object.queryParameters[i];
-                    if (__value__ != null) {
-                        result.queryParameters.push(ServiceRequestParameter.toObject(__value__));
-                    }
-                    else {
-                        result.queryParameters.push(ServiceRequestParameter.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.bodyParameters != null) {
-                result.bodyParameters = new Array();
-                for (var i = 0; i < object.bodyParameters.length; i++) {
-                    var __value__ = object.bodyParameters[i];
-                    if (__value__ != null) {
-                        result.bodyParameters.push(ServiceRequestParameter.toObject(__value__));
-                    }
-                    else {
-                        result.bodyParameters.push(ServiceRequestParameter.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.serviceToken != null) {
+                result.queryParameters = ServiceRequestParameter.toObjectArray(object.queryParameters);
+                result.bodyParameters = ServiceRequestParameter.toObjectArray(object.bodyParameters);
                 result.serviceToken = ServiceToken.toObject(object.serviceToken);
-            }
-            else {
-                result.serviceToken = ServiceToken.toObject(null);
-            }
-            if (object != null && object.refererHost != null)
                 result.refererHost = object.refererHost;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceRequest[].
+           @return {Adaptive.ServiceRequest[]} Wrapped object array instance.
+        */
+        ServiceRequest.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceRequest.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServiceRequest;
     })(APIBean);
@@ -6069,40 +6569,33 @@ doesn't exist, this will be -1. Used internally.
         */
         ServiceResponse.toObject = function (object) {
             var result = new ServiceResponse(null, null, null, null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.content != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.content = object.content;
-            if (object != null && object.contentType != null)
                 result.contentType = object.contentType;
-            if (object != null && object.contentEncoding != null) {
                 result.contentEncoding = IServiceContentEncoding.toObject(object.contentEncoding);
-            }
-            else {
-                result.contentEncoding = IServiceContentEncoding.toObject(null);
-            }
-            if (object != null && object.contentLength != null)
                 result.contentLength = object.contentLength;
-            if (object != null && object.serviceHeaders != null) {
-                result.serviceHeaders = new Array();
-                for (var i = 0; i < object.serviceHeaders.length; i++) {
-                    var __value__ = object.serviceHeaders[i];
-                    if (__value__ != null) {
-                        result.serviceHeaders.push(ServiceHeader.toObject(__value__));
-                    }
-                    else {
-                        result.serviceHeaders.push(ServiceHeader.toObject(null));
-                    }
+                result.serviceHeaders = ServiceHeader.toObjectArray(object.serviceHeaders);
+                result.serviceSession = ServiceSession.toObject(object.serviceSession);
+                result.statusCode = object.statusCode;
+            }
+            return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceResponse[].
+           @return {Adaptive.ServiceResponse[]} Wrapped object array instance.
+        */
+        ServiceResponse.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceResponse.toObject(object[i]));
                 }
             }
-            if (object != null && object.serviceSession != null) {
-                result.serviceSession = ServiceSession.toObject(object.serviceSession);
-            }
-            else {
-                result.serviceSession = ServiceSession.toObject(null);
-            }
-            if (object != null && object.statusCode != null)
-                result.statusCode = object.statusCode;
-            return result;
+            return resultArray;
         };
         return ServiceResponse;
     })(APIBean);
@@ -6208,32 +6701,28 @@ doesn't exist, this will be -1. Used internally.
         */
         ServiceSession.toObject = function (object) {
             var result = new ServiceSession(null, null);
-            // Assign values to bean fields.
-            if (object != null && object.cookies != null) {
-                result.cookies = new Array();
-                for (var i = 0; i < object.cookies.length; i++) {
-                    var __value__ = object.cookies[i];
-                    if (__value__ != null) {
-                        result.cookies.push(ServiceSessionCookie.toObject(__value__));
-                    }
-                    else {
-                        result.cookies.push(ServiceSessionCookie.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.attributes != null) {
-                result.attributes = new Array();
-                for (var i = 0; i < object.attributes.length; i++) {
-                    var __value__ = object.attributes[i];
-                    if (__value__ != null) {
-                        result.attributes.push(ServiceSessionAttribute.toObject(__value__));
-                    }
-                    else {
-                        result.attributes.push(ServiceSessionAttribute.toObject(null));
-                    }
-                }
+            if (object != null) {
+                // Assign values to bean fields.
+                result.cookies = ServiceSessionCookie.toObjectArray(object.cookies);
+                result.attributes = ServiceSessionAttribute.toObjectArray(object.attributes);
             }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceSession[].
+           @return {Adaptive.ServiceSession[]} Wrapped object array instance.
+        */
+        ServiceSession.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceSession.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServiceSession;
     })(APIBean);
@@ -6251,28 +6740,16 @@ doesn't exist, this will be -1. Used internally.
         __extends(ServiceSessionCookie, _super);
         /**
            @method constructor
-           Contructor with fields
+           Constructor used by the implementation
 
            @param {string} cookieName  Name of the cookie
            @param {string} cookieValue Value of the cookie
-           @param {string} domain      Domain of the cookie
-           @param {string} path        Path of the cookie
-           @param {string} scheme      Scheme of the cookie
-           @param {boolean} secure      Privacy of the cookie
-           @param {number} expiry      Expiration date of the cookie
-           @param {number} creation    Creation date of the cookie
            @since v2.0
         */
-        function ServiceSessionCookie(cookieName, cookieValue, domain, path, scheme, secure, expiry, creation) {
+        function ServiceSessionCookie(cookieName, cookieValue) {
             _super.call(this);
             this.cookieName = cookieName;
             this.cookieValue = cookieValue;
-            this.domain = domain;
-            this.path = path;
-            this.scheme = scheme;
-            this.secure = secure;
-            this.expiry = expiry;
-            this.creation = creation;
         }
         Object.defineProperty(ServiceSessionCookie.prototype, "cookieNameProperty", {
             /**
@@ -6554,25 +7031,35 @@ doesn't exist, this will be -1. Used internally.
            @return {Adaptive.ServiceSessionCookie} Wrapped object instance.
         */
         ServiceSessionCookie.toObject = function (object) {
-            var result = new ServiceSessionCookie(null, null, null, null, null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.cookieName != null)
+            var result = new ServiceSessionCookie(null, null);
+            if (object != null) {
+                // Assign values to bean fields.
                 result.cookieName = object.cookieName;
-            if (object != null && object.cookieValue != null)
                 result.cookieValue = object.cookieValue;
-            if (object != null && object.domain != null)
                 result.domain = object.domain;
-            if (object != null && object.path != null)
                 result.path = object.path;
-            if (object != null && object.scheme != null)
                 result.scheme = object.scheme;
-            if (object != null && object.secure != null)
                 result.secure = object.secure;
-            if (object != null && object.expiry != null)
                 result.expiry = object.expiry;
-            if (object != null && object.creation != null)
                 result.creation = object.creation;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceSessionCookie[].
+           @return {Adaptive.ServiceSessionCookie[]} Wrapped object array instance.
+        */
+        ServiceSessionCookie.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceSessionCookie.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServiceSessionCookie;
     })(APIBean);
@@ -6753,20 +7240,30 @@ doesn't exist, this will be -1. Used internally.
         */
         ServiceToken.toObject = function (object) {
             var result = new ServiceToken(null, null, null, null);
-            // Assign values to bean fields.
-            if (object != null && object.serviceName != null)
+            if (object != null) {
+                // Assign values to bean fields.
                 result.serviceName = object.serviceName;
-            if (object != null && object.endpointName != null)
                 result.endpointName = object.endpointName;
-            if (object != null && object.functionName != null)
                 result.functionName = object.functionName;
-            if (object != null && object.invocationMethod != null) {
                 result.invocationMethod = IServiceMethod.toObject(object.invocationMethod);
             }
-            else {
-                result.invocationMethod = IServiceMethod.toObject(null);
-            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceToken[].
+           @return {Adaptive.ServiceToken[]} Wrapped object array instance.
+        */
+        ServiceToken.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceToken.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServiceToken;
     })(APIBean);
@@ -6784,29 +7281,13 @@ doesn't exist, this will be -1. Used internally.
         __extends(Contact, _super);
         /**
            @method constructor
-           Constructor with all the fields
+           Constructor used by implementation to set the Contact.
 
-           @param {string} contactId        Identifier of the contact
-           @param {Adaptive.ContactPersonalInfo} personalInfo     Personal Information
-           @param {Adaptive.ContactProfessionalInfo} professionalInfo Professional Information
-           @param {Adaptive.ContactAddress[]} contactAddresses Addresses of the contact
-           @param {Adaptive.ContactPhone[]} contactPhones    Phones of the contact
-           @param {Adaptive.ContactEmail[]} contactEmails    Emails of the contact
-           @param {Adaptive.ContactWebsite[]} contactWebsites  Websites of the contact
-           @param {Adaptive.ContactSocial[]} contactSocials   Social Networks of the contact
-           @param {Adaptive.ContactTag[]} contactTags      Tags of the contact
+           @param {string} contactId of the Contact
            @since v2.0
         */
-        function Contact(contactId, personalInfo, professionalInfo, contactAddresses, contactPhones, contactEmails, contactWebsites, contactSocials, contactTags) {
+        function Contact(contactId) {
             _super.call(this, contactId);
-            this.personalInfo = personalInfo;
-            this.professionalInfo = professionalInfo;
-            this.contactAddresses = contactAddresses;
-            this.contactPhones = contactPhones;
-            this.contactEmails = contactEmails;
-            this.contactWebsites = contactWebsites;
-            this.contactSocials = contactSocials;
-            this.contactTags = contactTags;
         }
         Object.defineProperty(Contact.prototype, "contactAddressesProperty", {
             /**
@@ -7088,96 +7569,37 @@ doesn't exist, this will be -1. Used internally.
            @return {Adaptive.Contact} Wrapped object instance.
         */
         Contact.toObject = function (object) {
-            var result = new Contact(null, null, null, null, null, null, null, null, null);
-            // Assign values to parent bean fields.
-            if (object != null && object.contactId != null)
+            var result = new Contact(null);
+            if (object != null) {
+                // Assign values to parent bean fields.
                 result.contactId = object.contactId;
-            // Assign values to bean fields.
-            if (object != null && object.personalInfo != null) {
+                // Assign values to bean fields.
                 result.personalInfo = ContactPersonalInfo.toObject(object.personalInfo);
-            }
-            else {
-                result.personalInfo = ContactPersonalInfo.toObject(null);
-            }
-            if (object != null && object.professionalInfo != null) {
                 result.professionalInfo = ContactProfessionalInfo.toObject(object.professionalInfo);
-            }
-            else {
-                result.professionalInfo = ContactProfessionalInfo.toObject(null);
-            }
-            if (object != null && object.contactAddresses != null) {
-                result.contactAddresses = new Array();
-                for (var i = 0; i < object.contactAddresses.length; i++) {
-                    var __value__ = object.contactAddresses[i];
-                    if (__value__ != null) {
-                        result.contactAddresses.push(ContactAddress.toObject(__value__));
-                    }
-                    else {
-                        result.contactAddresses.push(ContactAddress.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.contactPhones != null) {
-                result.contactPhones = new Array();
-                for (var i = 0; i < object.contactPhones.length; i++) {
-                    var __value__ = object.contactPhones[i];
-                    if (__value__ != null) {
-                        result.contactPhones.push(ContactPhone.toObject(__value__));
-                    }
-                    else {
-                        result.contactPhones.push(ContactPhone.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.contactEmails != null) {
-                result.contactEmails = new Array();
-                for (var i = 0; i < object.contactEmails.length; i++) {
-                    var __value__ = object.contactEmails[i];
-                    if (__value__ != null) {
-                        result.contactEmails.push(ContactEmail.toObject(__value__));
-                    }
-                    else {
-                        result.contactEmails.push(ContactEmail.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.contactWebsites != null) {
-                result.contactWebsites = new Array();
-                for (var i = 0; i < object.contactWebsites.length; i++) {
-                    var __value__ = object.contactWebsites[i];
-                    if (__value__ != null) {
-                        result.contactWebsites.push(ContactWebsite.toObject(__value__));
-                    }
-                    else {
-                        result.contactWebsites.push(ContactWebsite.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.contactSocials != null) {
-                result.contactSocials = new Array();
-                for (var i = 0; i < object.contactSocials.length; i++) {
-                    var __value__ = object.contactSocials[i];
-                    if (__value__ != null) {
-                        result.contactSocials.push(ContactSocial.toObject(__value__));
-                    }
-                    else {
-                        result.contactSocials.push(ContactSocial.toObject(null));
-                    }
-                }
-            }
-            if (object != null && object.contactTags != null) {
-                result.contactTags = new Array();
-                for (var i = 0; i < object.contactTags.length; i++) {
-                    var __value__ = object.contactTags[i];
-                    if (__value__ != null) {
-                        result.contactTags.push(ContactTag.toObject(__value__));
-                    }
-                    else {
-                        result.contactTags.push(ContactTag.toObject(null));
-                    }
-                }
+                result.contactAddresses = ContactAddress.toObjectArray(object.contactAddresses);
+                result.contactPhones = ContactPhone.toObjectArray(object.contactPhones);
+                result.contactEmails = ContactEmail.toObjectArray(object.contactEmails);
+                result.contactWebsites = ContactWebsite.toObjectArray(object.contactWebsites);
+                result.contactSocials = ContactSocial.toObjectArray(object.contactSocials);
+                result.contactTags = ContactTag.toObjectArray(object.contactTags);
             }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.Contact[].
+           @return {Adaptive.Contact[]} Wrapped object array instance.
+        */
+        Contact.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(Contact.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return Contact;
     })(ContactUid);
@@ -7213,12 +7635,28 @@ doesn't exist, this will be -1. Used internally.
         */
         ServiceHeader.toObject = function (object) {
             var result = new ServiceHeader(null, null);
-            // Assign values to parent bean fields.
-            if (object != null && object.keyName != null)
+            if (object != null) {
+                // Assign values to parent bean fields.
                 result.keyName = object.keyName;
-            if (object != null && object.keyData != null)
                 result.keyData = object.keyData;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceHeader[].
+           @return {Adaptive.ServiceHeader[]} Wrapped object array instance.
+        */
+        ServiceHeader.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceHeader.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServiceHeader;
     })(KeyValue);
@@ -7254,12 +7692,28 @@ doesn't exist, this will be -1. Used internally.
         */
         ServiceRequestParameter.toObject = function (object) {
             var result = new ServiceRequestParameter(null, null);
-            // Assign values to parent bean fields.
-            if (object != null && object.keyName != null)
+            if (object != null) {
+                // Assign values to parent bean fields.
                 result.keyName = object.keyName;
-            if (object != null && object.keyData != null)
                 result.keyData = object.keyData;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceRequestParameter[].
+           @return {Adaptive.ServiceRequestParameter[]} Wrapped object array instance.
+        */
+        ServiceRequestParameter.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceRequestParameter.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServiceRequestParameter;
     })(KeyValue);
@@ -7295,12 +7749,28 @@ doesn't exist, this will be -1. Used internally.
         */
         ServiceSessionAttribute.toObject = function (object) {
             var result = new ServiceSessionAttribute(null, null);
-            // Assign values to parent bean fields.
-            if (object != null && object.keyName != null)
+            if (object != null) {
+                // Assign values to parent bean fields.
                 result.keyName = object.keyName;
-            if (object != null && object.keyData != null)
                 result.keyData = object.keyData;
+            }
             return result;
+        };
+        /**
+           @method
+           @static
+           Convert JSON parsed object array to typed equivalent.
+           @param {Object} object JSON parsed structure of type Adaptive.ServiceSessionAttribute[].
+           @return {Adaptive.ServiceSessionAttribute[]} Wrapped object array instance.
+        */
+        ServiceSessionAttribute.toObjectArray = function (object) {
+            var resultArray = new Array();
+            if (object != null) {
+                for (var i = 0; i < object.length; i++) {
+                    resultArray.push(ServiceSessionAttribute.toObject(object[i]));
+                }
+            }
+            return resultArray;
         };
         return ServiceSessionAttribute;
     })(KeyValue);
@@ -7335,7 +7805,7 @@ doesn't exist, this will be -1. Used internally.
            The version of the API.
         */
         BaseListener.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         /**
            @method
@@ -8380,7 +8850,7 @@ event may be fired if the application vetoes display rotation before rotation is
            The version of the API.
         */
         BaseCallback.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseCallback;
     })();
@@ -10143,7 +10613,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseApplicationBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseApplicationBridge;
     })();
@@ -10178,7 +10648,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseCommerceBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseCommerceBridge;
     })();
@@ -10213,7 +10683,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseCommunicationBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseCommunicationBridge;
     })();
@@ -10248,7 +10718,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseDataBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseDataBridge;
     })();
@@ -10283,7 +10753,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseMediaBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseMediaBridge;
     })();
@@ -10318,7 +10788,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseNotificationBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseNotificationBridge;
     })();
@@ -10353,7 +10823,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BasePIMBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BasePIMBridge;
     })();
@@ -10388,7 +10858,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseReaderBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseReaderBridge;
     })();
@@ -10423,7 +10893,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseSecurityBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseSecurityBridge;
     })();
@@ -10458,7 +10928,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseSensorBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseSensorBridge;
     })();
@@ -10493,7 +10963,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseSocialBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseSocialBridge;
     })();
@@ -10528,7 +10998,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseSystemBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseSystemBridge;
     })();
@@ -10563,7 +11033,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseUIBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseUIBridge;
     })();
@@ -10598,7 +11068,7 @@ event may be fired if the application vetoes display rotation before rotation is
            @return {string} The version of the API.
         */
         BaseUtilBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         return BaseUtilBridge;
     })();
@@ -10651,33 +11121,12 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IGlobalization", "getDefaultLocale", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = Locale.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'GlobalizationBridge.getDefaultLocale' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'GlobalizationBridge.getDefaultLocale' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'GlobalizationBridge.getDefaultLocale' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = Locale.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -10692,37 +11141,16 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IGlobalization", "getLocaleSupportedDescriptors", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = new Array();
-                        var responseArray = JSON.parse(apiResponse.getResponse());
-                        for (var __key__ in responseArray) {
-                            response.push(Locale.toObject(responseArray[__key__]));
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'GlobalizationBridge.getLocaleSupportedDescriptors' [" + apiResponse.getStatusMessage() + "].");
-                    }
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = new Array();
+                var responseArray = JSON.parse(apiResponse.getResponse());
+                for (var i = 0; i < responseArray.length; i++) {
+                    response.push(Locale.toObject(responseArray[i]));
                 }
-                else {
-                    console.error("ERROR: 'GlobalizationBridge.getLocaleSupportedDescriptors' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'GlobalizationBridge.getLocaleSupportedDescriptors' request.");
             }
             return response;
         };
@@ -10741,33 +11169,12 @@ event may be fired if the application vetoes display rotation before rotation is
             arParams.push(JSON.stringify(key));
             arParams.push(JSON.stringify(locale));
             var apiRequest = new APIRequest("IGlobalization", "getResourceLiteral", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = apiResponse.getResponse();
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'GlobalizationBridge.getResourceLiteral' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'GlobalizationBridge.getResourceLiteral' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'GlobalizationBridge.getResourceLiteral' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = apiResponse.getResponse();
             }
             return response;
         };
@@ -10784,37 +11191,16 @@ event may be fired if the application vetoes display rotation before rotation is
             var arParams = [];
             arParams.push(JSON.stringify(locale));
             var apiRequest = new APIRequest("IGlobalization", "getResourceLiterals", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = new Array();
-                        var responseArray = JSON.parse(apiResponse.getResponse());
-                        for (var __key__ in responseArray) {
-                            response.push(KeyPair.toObject(responseArray[__key__]));
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'GlobalizationBridge.getResourceLiterals' [" + apiResponse.getStatusMessage() + "].");
-                    }
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = new Array();
+                var responseArray = JSON.parse(apiResponse.getResponse());
+                for (var i = 0; i < responseArray.length; i++) {
+                    response.push(KeyPair.toObject(responseArray[i]));
                 }
-                else {
-                    console.error("ERROR: 'GlobalizationBridge.getResourceLiterals' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'GlobalizationBridge.getResourceLiterals' request.");
             }
             return response;
         };
@@ -10849,38 +11235,7 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("ILifecycle", "addLifecycleListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add listener reference to local dictionary.
-            Adaptive.registeredLifecycleListener.add("" + listener.getId(), listener);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove listener reference from local dictionary due to invalid response.
-                        Adaptive.registeredLifecycleListener.remove("" + listener.getId());
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'LifecycleBridge.addLifecycleListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove listener reference from local dictionary due to invalid response.
-                    Adaptive.registeredLifecycleListener.remove("" + listener.getId());
-                    console.error("ERROR: 'LifecycleBridge.addLifecycleListener' incorrect response received.");
-                }
-            }
-            else {
-                // Remove listener reference from local dictionary due to invalid response.
-                Adaptive.registeredLifecycleListener.remove("" + listener.getId());
-                console.error("ERROR: " + xhr.status + " sending 'LifecycleBridge.addLifecycleListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredLifecycleListener);
         };
         /**
            @method
@@ -10893,33 +11248,12 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("ILifecycle", "isBackground", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'LifecycleBridge.isBackground' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'LifecycleBridge.isBackground' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'LifecycleBridge.isBackground' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -10934,32 +11268,7 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("ILifecycle", "removeLifecycleListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove listener reference from local dictionary.
-                        Adaptive.registeredLifecycleListener.remove("" + listener.getId());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'LifecycleBridge.removeLifecycleListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'LifecycleBridge.removeLifecycleListener' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'LifecycleBridge.removeLifecycleListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredLifecycleListener);
         };
         /**
            @method
@@ -10971,35 +11280,7 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("ILifecycle", "removeLifecycleListeners", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove all listeners references from local dictionary.
-                        var keys = Adaptive.registeredLifecycleListener.keys();
-                        for (var key in keys) {
-                            Adaptive.registeredLifecycleListener.remove(key);
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'LifecycleBridge.removeLifecycleListeners' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'LifecycleBridge.removeLifecycleListeners' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'LifecycleBridge.removeLifecycleListeners' request.");
-            }
+            postRequestListener(apiRequest, null, Adaptive.registeredLifecycleListener);
         };
         return LifecycleBridge;
     })(BaseApplicationBridge);
@@ -11234,41 +11515,7 @@ event may be fired if the application vetoes display rotation before rotation is
             var arParams = [];
             arParams.push(JSON.stringify(host));
             var apiRequest = new APIRequest("INetworkReachability", "isNetworkReachable", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredNetworkReachabilityCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredNetworkReachabilityCallback.remove("" + callback.getId());
-                        callback.onError(INetworkReachabilityCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'NetworkReachabilityBridge.isNetworkReachable' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredNetworkReachabilityCallback.remove("" + callback.getId());
-                    callback.onError(INetworkReachabilityCallbackError.Unknown);
-                    console.error("ERROR: 'NetworkReachabilityBridge.isNetworkReachable' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredNetworkReachabilityCallback.remove("" + callback.getId());
-                callback.onError(INetworkReachabilityCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'NetworkReachabilityBridge.isNetworkReachable' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredNetworkReachabilityCallback);
         };
         /**
            @method
@@ -11283,41 +11530,7 @@ event may be fired if the application vetoes display rotation before rotation is
             var arParams = [];
             arParams.push(JSON.stringify(url));
             var apiRequest = new APIRequest("INetworkReachability", "isNetworkServiceReachable", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredNetworkReachabilityCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredNetworkReachabilityCallback.remove("" + callback.getId());
-                        callback.onError(INetworkReachabilityCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'NetworkReachabilityBridge.isNetworkServiceReachable' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredNetworkReachabilityCallback.remove("" + callback.getId());
-                    callback.onError(INetworkReachabilityCallbackError.Unknown);
-                    console.error("ERROR: 'NetworkReachabilityBridge.isNetworkServiceReachable' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredNetworkReachabilityCallback.remove("" + callback.getId());
-                callback.onError(INetworkReachabilityCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'NetworkReachabilityBridge.isNetworkServiceReachable' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredNetworkReachabilityCallback);
         };
         return NetworkReachabilityBridge;
     })(BaseCommunicationBridge);
@@ -11350,38 +11563,7 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("INetworkStatus", "addNetworkStatusListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add listener reference to local dictionary.
-            Adaptive.registeredNetworkStatusListener.add("" + listener.getId(), listener);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove listener reference from local dictionary due to invalid response.
-                        Adaptive.registeredNetworkStatusListener.remove("" + listener.getId());
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'NetworkStatusBridge.addNetworkStatusListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove listener reference from local dictionary due to invalid response.
-                    Adaptive.registeredNetworkStatusListener.remove("" + listener.getId());
-                    console.error("ERROR: 'NetworkStatusBridge.addNetworkStatusListener' incorrect response received.");
-                }
-            }
-            else {
-                // Remove listener reference from local dictionary due to invalid response.
-                Adaptive.registeredNetworkStatusListener.remove("" + listener.getId());
-                console.error("ERROR: " + xhr.status + " sending 'NetworkStatusBridge.addNetworkStatusListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredNetworkStatusListener);
         };
         /**
            @method
@@ -11394,32 +11576,7 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("INetworkStatus", "removeNetworkStatusListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove listener reference from local dictionary.
-                        Adaptive.registeredNetworkStatusListener.remove("" + listener.getId());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'NetworkStatusBridge.removeNetworkStatusListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'NetworkStatusBridge.removeNetworkStatusListener' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'NetworkStatusBridge.removeNetworkStatusListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredNetworkStatusListener);
         };
         /**
            @method
@@ -11431,35 +11588,7 @@ event may be fired if the application vetoes display rotation before rotation is
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("INetworkStatus", "removeNetworkStatusListeners", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove all listeners references from local dictionary.
-                        var keys = Adaptive.registeredNetworkStatusListener.keys();
-                        for (var key in keys) {
-                            Adaptive.registeredNetworkStatusListener.remove(key);
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'NetworkStatusBridge.removeNetworkStatusListeners' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'NetworkStatusBridge.removeNetworkStatusListeners' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'NetworkStatusBridge.removeNetworkStatusListeners' request.");
-            }
+            postRequestListener(apiRequest, null, Adaptive.registeredNetworkStatusListener);
         };
         return NetworkStatusBridge;
     })(BaseCommunicationBridge);
@@ -11497,33 +11626,12 @@ manipulated as needed by the application before submitting the ServiceRequest vi
             var arParams = [];
             arParams.push(JSON.stringify(serviceToken));
             var apiRequest = new APIRequest("IService", "getServiceRequest", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = ServiceRequest.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ServiceBridge.getServiceRequest' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'ServiceBridge.getServiceRequest' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'ServiceBridge.getServiceRequest' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = ServiceRequest.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -11547,33 +11655,12 @@ configured in the platform's XML service definition file.
             arParams.push(JSON.stringify(functionName));
             arParams.push(JSON.stringify(method));
             var apiRequest = new APIRequest("IService", "getServiceToken", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = ServiceToken.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ServiceBridge.getServiceToken' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'ServiceBridge.getServiceToken' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'ServiceBridge.getServiceToken' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = ServiceToken.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -11593,33 +11680,12 @@ configured in the platform's XML service definition file.
             var arParams = [];
             arParams.push(JSON.stringify(uri));
             var apiRequest = new APIRequest("IService", "getServiceTokenByUri", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = ServiceToken.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ServiceBridge.getServiceTokenByUri' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'ServiceBridge.getServiceTokenByUri' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'ServiceBridge.getServiceTokenByUri' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = ServiceToken.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -11634,37 +11700,16 @@ configured in the platform's XML service definition file.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IService", "getServicesRegistered", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = new Array();
-                        var responseArray = JSON.parse(apiResponse.getResponse());
-                        for (var __key__ in responseArray) {
-                            response.push(ServiceToken.toObject(responseArray[__key__]));
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ServiceBridge.getServicesRegistered' [" + apiResponse.getStatusMessage() + "].");
-                    }
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = new Array();
+                var responseArray = JSON.parse(apiResponse.getResponse());
+                for (var i = 0; i < responseArray.length; i++) {
+                    response.push(ServiceToken.toObject(responseArray[i]));
                 }
-                else {
-                    console.error("ERROR: 'ServiceBridge.getServicesRegistered' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'ServiceBridge.getServicesRegistered' request.");
             }
             return response;
         };
@@ -11681,41 +11726,7 @@ configured in the platform's XML service definition file.
             var arParams = [];
             arParams.push(JSON.stringify(serviceRequest));
             var apiRequest = new APIRequest("IService", "invokeService", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredServiceResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredServiceResultCallback.remove("" + callback.getId());
-                        callback.onError(IServiceResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ServiceBridge.invokeService' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredServiceResultCallback.remove("" + callback.getId());
-                    callback.onError(IServiceResultCallbackError.Unknown);
-                    console.error("ERROR: 'ServiceBridge.invokeService' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredServiceResultCallback.remove("" + callback.getId());
-                callback.onError(IServiceResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'ServiceBridge.invokeService' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredServiceResultCallback);
         };
         /**
            @method
@@ -11737,33 +11748,12 @@ XML service definition file.
             arParams.push(JSON.stringify(functionName));
             arParams.push(JSON.stringify(method));
             var apiRequest = new APIRequest("IService", "isServiceRegistered", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ServiceBridge.isServiceRegistered' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'ServiceBridge.isServiceRegistered' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'ServiceBridge.isServiceRegistered' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -11820,33 +11810,12 @@ XML service definition file.
             var arParams = [];
             arParams.push(JSON.stringify(number));
             var apiRequest = new APIRequest("ITelephony", "call", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = ITelephonyStatus.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'TelephonyBridge.call' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'TelephonyBridge.call' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'TelephonyBridge.call' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = ITelephonyStatus.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -11923,41 +11892,7 @@ XML service definition file.
             var arParams = [];
             arParams.push(JSON.stringify(database));
             var apiRequest = new APIRequest("IDatabase", "createDatabase", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredDatabaseResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredDatabaseResultCallback.remove("" + callback.getId());
-                        callback.onError(IDatabaseResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DatabaseBridge.createDatabase' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredDatabaseResultCallback.remove("" + callback.getId());
-                    callback.onError(IDatabaseResultCallbackError.Unknown);
-                    console.error("ERROR: 'DatabaseBridge.createDatabase' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredDatabaseResultCallback.remove("" + callback.getId());
-                callback.onError(IDatabaseResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'DatabaseBridge.createDatabase' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredDatabaseResultCallback);
         };
         /**
            @method
@@ -11974,41 +11909,7 @@ XML service definition file.
             arParams.push(JSON.stringify(database));
             arParams.push(JSON.stringify(databaseTable));
             var apiRequest = new APIRequest("IDatabase", "createTable", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredDatabaseTableResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                        callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DatabaseBridge.createTable' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                    callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                    console.error("ERROR: 'DatabaseBridge.createTable' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'DatabaseBridge.createTable' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredDatabaseTableResultCallback);
         };
         /**
            @method
@@ -12023,41 +11924,7 @@ XML service definition file.
             var arParams = [];
             arParams.push(JSON.stringify(database));
             var apiRequest = new APIRequest("IDatabase", "deleteDatabase", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredDatabaseResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredDatabaseResultCallback.remove("" + callback.getId());
-                        callback.onError(IDatabaseResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DatabaseBridge.deleteDatabase' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredDatabaseResultCallback.remove("" + callback.getId());
-                    callback.onError(IDatabaseResultCallbackError.Unknown);
-                    console.error("ERROR: 'DatabaseBridge.deleteDatabase' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredDatabaseResultCallback.remove("" + callback.getId());
-                callback.onError(IDatabaseResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'DatabaseBridge.deleteDatabase' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredDatabaseResultCallback);
         };
         /**
            @method
@@ -12074,41 +11941,7 @@ XML service definition file.
             arParams.push(JSON.stringify(database));
             arParams.push(JSON.stringify(databaseTable));
             var apiRequest = new APIRequest("IDatabase", "deleteTable", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredDatabaseTableResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                        callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DatabaseBridge.deleteTable' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                    callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                    console.error("ERROR: 'DatabaseBridge.deleteTable' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'DatabaseBridge.deleteTable' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredDatabaseTableResultCallback);
         };
         /**
            @method
@@ -12128,41 +11961,7 @@ should be passed as a parameter
             arParams.push(JSON.stringify(statement));
             arParams.push(JSON.stringify(replacements));
             var apiRequest = new APIRequest("IDatabase", "executeSqlStatement", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredDatabaseTableResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                        callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DatabaseBridge.executeSqlStatement' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                    callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                    console.error("ERROR: 'DatabaseBridge.executeSqlStatement' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'DatabaseBridge.executeSqlStatement' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredDatabaseTableResultCallback);
         };
         /**
            @method
@@ -12182,41 +11981,7 @@ should be passed as a parameter
             arParams.push(JSON.stringify(statements));
             arParams.push(JSON.stringify(rollbackFlag));
             var apiRequest = new APIRequest("IDatabase", "executeSqlTransactions", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredDatabaseTableResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                        callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DatabaseBridge.executeSqlTransactions' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                    callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                    console.error("ERROR: 'DatabaseBridge.executeSqlTransactions' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredDatabaseTableResultCallback.remove("" + callback.getId());
-                callback.onError(IDatabaseTableResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'DatabaseBridge.executeSqlTransactions' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredDatabaseTableResultCallback);
         };
         /**
            @method
@@ -12231,33 +11996,12 @@ should be passed as a parameter
             var arParams = [];
             arParams.push(JSON.stringify(database));
             var apiRequest = new APIRequest("IDatabase", "existsDatabase", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DatabaseBridge.existsDatabase' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DatabaseBridge.existsDatabase' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DatabaseBridge.existsDatabase' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -12276,33 +12020,12 @@ should be passed as a parameter
             arParams.push(JSON.stringify(database));
             arParams.push(JSON.stringify(databaseTable));
             var apiRequest = new APIRequest("IDatabase", "existsTable", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DatabaseBridge.existsTable' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DatabaseBridge.existsTable' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DatabaseBridge.existsTable' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -12339,33 +12062,12 @@ should be passed as a parameter
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "canRead", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.canRead' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.canRead' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.canRead' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -12382,33 +12084,12 @@ should be passed as a parameter
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "canWrite", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.canWrite' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.canWrite' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.canWrite' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -12425,41 +12106,7 @@ should be passed as a parameter
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "create", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredFileResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredFileResultCallback.remove("" + callback.getId());
-                        callback.onError(IFileResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.create' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredFileResultCallback.remove("" + callback.getId());
-                    callback.onError(IFileResultCallbackError.Unknown);
-                    console.error("ERROR: 'FileBridge.create' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredFileResultCallback.remove("" + callback.getId());
-                callback.onError(IFileResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.create' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredFileResultCallback);
         };
         /**
            @method
@@ -12477,33 +12124,12 @@ deleted if the cascade parameter is set to true.
             arParams.push(JSON.stringify(descriptor));
             arParams.push(JSON.stringify(cascade));
             var apiRequest = new APIRequest("IFile", "delete", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.delete' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.delete' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.delete' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -12520,33 +12146,12 @@ deleted if the cascade parameter is set to true.
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "exists", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.exists' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.exists' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.exists' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -12563,41 +12168,7 @@ deleted if the cascade parameter is set to true.
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "getContent", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredFileDataLoadResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredFileDataLoadResultCallback.remove("" + callback.getId());
-                        callback.onError(IFileDataLoadResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.getContent' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredFileDataLoadResultCallback.remove("" + callback.getId());
-                    callback.onError(IFileDataLoadResultCallbackError.Unknown);
-                    console.error("ERROR: 'FileBridge.getContent' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredFileDataLoadResultCallback.remove("" + callback.getId());
-                callback.onError(IFileDataLoadResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.getContent' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredFileDataLoadResultCallback);
         };
         /**
            @method
@@ -12612,33 +12183,12 @@ deleted if the cascade parameter is set to true.
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "getFileStorageType", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = IFileSystemStorageType.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.getFileStorageType' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.getFileStorageType' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.getFileStorageType' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = IFileSystemStorageType.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -12655,33 +12205,12 @@ deleted if the cascade parameter is set to true.
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "getFileType", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = IFileSystemType.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.getFileType' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.getFileType' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.getFileType' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = IFileSystemType.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -12698,33 +12227,12 @@ deleted if the cascade parameter is set to true.
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "getSecurityType", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = IFileSystemSecurity.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.getSecurityType' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.getSecurityType' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.getSecurityType' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = IFileSystemSecurity.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -12741,33 +12249,12 @@ deleted if the cascade parameter is set to true.
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "isDirectory", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.isDirectory' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.isDirectory' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.isDirectory' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -12785,41 +12272,7 @@ any results.
             var arParams = [];
             arParams.push(JSON.stringify(descriptor));
             var apiRequest = new APIRequest("IFile", "listFiles", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredFileListResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredFileListResultCallback.remove("" + callback.getId());
-                        callback.onError(IFileListResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.listFiles' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredFileListResultCallback.remove("" + callback.getId());
-                    callback.onError(IFileListResultCallbackError.Unknown);
-                    console.error("ERROR: 'FileBridge.listFiles' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredFileListResultCallback.remove("" + callback.getId());
-                callback.onError(IFileListResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.listFiles' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredFileListResultCallback);
         };
         /**
            @method
@@ -12837,41 +12290,7 @@ is a file, it will not yield any results.
             arParams.push(JSON.stringify(descriptor));
             arParams.push(JSON.stringify(regex));
             var apiRequest = new APIRequest("IFile", "listFilesForRegex", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredFileListResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredFileListResultCallback.remove("" + callback.getId());
-                        callback.onError(IFileListResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.listFilesForRegex' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredFileListResultCallback.remove("" + callback.getId());
-                    callback.onError(IFileListResultCallbackError.Unknown);
-                    console.error("ERROR: 'FileBridge.listFilesForRegex' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredFileListResultCallback.remove("" + callback.getId());
-                callback.onError(IFileListResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.listFilesForRegex' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredFileListResultCallback);
         };
         /**
            @method
@@ -12888,33 +12307,12 @@ is a file, it will not yield any results.
             arParams.push(JSON.stringify(descriptor));
             arParams.push(JSON.stringify(recursive));
             var apiRequest = new APIRequest("IFile", "mkDir", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.mkDir' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileBridge.mkDir' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.mkDir' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -12938,41 +12336,7 @@ new destination file.
             arParams.push(JSON.stringify(createPath));
             arParams.push(JSON.stringify(overwrite));
             var apiRequest = new APIRequest("IFile", "move", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredFileResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredFileResultCallback.remove("" + callback.getId());
-                        callback.onError(IFileResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.move' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredFileResultCallback.remove("" + callback.getId());
-                    callback.onError(IFileResultCallbackError.Unknown);
-                    console.error("ERROR: 'FileBridge.move' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredFileResultCallback.remove("" + callback.getId());
-                callback.onError(IFileResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.move' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredFileResultCallback);
         };
         /**
            @method
@@ -12989,41 +12353,7 @@ new destination file.
             arParams.push(JSON.stringify(descriptor));
             arParams.push(JSON.stringify(content));
             var apiRequest = new APIRequest("IFile", "setContent", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredFileDataStoreResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredFileDataStoreResultCallback.remove("" + callback.getId());
-                        callback.onError(IFileDataStoreResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileBridge.setContent' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredFileDataStoreResultCallback.remove("" + callback.getId());
-                    callback.onError(IFileDataStoreResultCallbackError.Unknown);
-                    console.error("ERROR: 'FileBridge.setContent' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredFileDataStoreResultCallback.remove("" + callback.getId());
-                callback.onError(IFileDataStoreResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'FileBridge.setContent' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredFileDataStoreResultCallback);
         };
         return FileBridge;
     })(BaseDataBridge);
@@ -13061,33 +12391,12 @@ This method does not create the actual file in the specified folder.
             arParams.push(JSON.stringify(parent));
             arParams.push(JSON.stringify(name));
             var apiRequest = new APIRequest("IFileSystem", "createFileDescriptor", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileSystemBridge.createFileDescriptor' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileSystemBridge.createFileDescriptor' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileSystemBridge.createFileDescriptor' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -13104,33 +12413,12 @@ This path is volatile and may be cleaned by the OS periodically.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IFileSystem", "getApplicationCacheFolder", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileSystemBridge.getApplicationCacheFolder' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileSystemBridge.getApplicationCacheFolder' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileSystemBridge.getApplicationCacheFolder' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -13146,33 +12434,12 @@ This path must always be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IFileSystem", "getApplicationCloudFolder", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileSystemBridge.getApplicationCloudFolder' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileSystemBridge.getApplicationCloudFolder' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileSystemBridge.getApplicationCloudFolder' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -13188,33 +12455,12 @@ This path must always be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IFileSystem", "getApplicationDocumentsFolder", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileSystemBridge.getApplicationDocumentsFolder' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileSystemBridge.getApplicationDocumentsFolder' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileSystemBridge.getApplicationDocumentsFolder' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -13230,33 +12476,12 @@ This path may or may not be directly readable or writable - it usually contains 
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IFileSystem", "getApplicationFolder", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileSystemBridge.getApplicationFolder' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileSystemBridge.getApplicationFolder' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileSystemBridge.getApplicationFolder' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -13272,33 +12497,12 @@ This path must always be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IFileSystem", "getApplicationProtectedFolder", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileSystemBridge.getApplicationProtectedFolder' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileSystemBridge.getApplicationProtectedFolder' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileSystemBridge.getApplicationProtectedFolder' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -13313,33 +12517,12 @@ This path must always be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IFileSystem", "getSeparator", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = apiResponse.getResponse();
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileSystemBridge.getSeparator' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileSystemBridge.getSeparator' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileSystemBridge.getSeparator' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = apiResponse.getResponse();
             }
             return response;
         };
@@ -13357,33 +12540,12 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IFileSystem", "getSystemExternalFolder", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'FileSystemBridge.getSystemExternalFolder' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'FileSystemBridge.getSystemExternalFolder' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'FileSystemBridge.getSystemExternalFolder' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = FileDescriptor.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -13519,19 +12681,7 @@ This path may or may not be writable by the current application.
             var arParams = [];
             arParams.push(JSON.stringify(url));
             var apiRequest = new APIRequest("IVideo", "playStream", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'VideoBridge.playStream' request.");
-            }
+            postRequest(apiRequest);
         };
         return VideoBridge;
     })(BaseMediaBridge);
@@ -13666,41 +12816,7 @@ This path may or may not be writable by the current application.
             var arParams = [];
             arParams.push(JSON.stringify(contact));
             var apiRequest = new APIRequest("IContact", "getContact", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredContactResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                        callback.onError(IContactResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ContactBridge.getContact' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                    callback.onError(IContactResultCallbackError.Unknown);
-                    console.error("ERROR: 'ContactBridge.getContact' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                callback.onError(IContactResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'ContactBridge.getContact' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredContactResultCallback);
         };
         /**
            @method
@@ -13715,41 +12831,7 @@ This path may or may not be writable by the current application.
             var arParams = [];
             arParams.push(JSON.stringify(contact));
             var apiRequest = new APIRequest("IContact", "getContactPhoto", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredContactPhotoResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredContactPhotoResultCallback.remove("" + callback.getId());
-                        callback.onError(IContactPhotoResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ContactBridge.getContactPhoto' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredContactPhotoResultCallback.remove("" + callback.getId());
-                    callback.onError(IContactPhotoResultCallbackError.Unknown);
-                    console.error("ERROR: 'ContactBridge.getContactPhoto' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredContactPhotoResultCallback.remove("" + callback.getId());
-                callback.onError(IContactPhotoResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'ContactBridge.getContactPhoto' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredContactPhotoResultCallback);
         };
         /**
            @method
@@ -13762,41 +12844,7 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IContact", "getContacts", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredContactResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                        callback.onError(IContactResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ContactBridge.getContacts' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                    callback.onError(IContactResultCallbackError.Unknown);
-                    console.error("ERROR: 'ContactBridge.getContacts' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                callback.onError(IContactResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'ContactBridge.getContacts' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredContactResultCallback);
         };
         /**
            @method
@@ -13811,41 +12859,7 @@ This path may or may not be writable by the current application.
             var arParams = [];
             arParams.push(JSON.stringify(fields));
             var apiRequest = new APIRequest("IContact", "getContactsForFields", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredContactResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                        callback.onError(IContactResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ContactBridge.getContactsForFields' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                    callback.onError(IContactResultCallbackError.Unknown);
-                    console.error("ERROR: 'ContactBridge.getContactsForFields' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                callback.onError(IContactResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'ContactBridge.getContactsForFields' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredContactResultCallback);
         };
         /**
            @method
@@ -13862,41 +12876,7 @@ This path may or may not be writable by the current application.
             arParams.push(JSON.stringify(fields));
             arParams.push(JSON.stringify(filter));
             var apiRequest = new APIRequest("IContact", "getContactsWithFilter", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredContactResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                        callback.onError(IContactResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ContactBridge.getContactsWithFilter' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                    callback.onError(IContactResultCallbackError.Unknown);
-                    console.error("ERROR: 'ContactBridge.getContactsWithFilter' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                callback.onError(IContactResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'ContactBridge.getContactsWithFilter' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredContactResultCallback);
         };
         /**
            @method
@@ -13911,41 +12891,7 @@ This path may or may not be writable by the current application.
             var arParams = [];
             arParams.push(JSON.stringify(term));
             var apiRequest = new APIRequest("IContact", "searchContacts", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredContactResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                        callback.onError(IContactResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ContactBridge.searchContacts' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                    callback.onError(IContactResultCallbackError.Unknown);
-                    console.error("ERROR: 'ContactBridge.searchContacts' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                callback.onError(IContactResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'ContactBridge.searchContacts' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredContactResultCallback);
         };
         /**
            @method
@@ -13962,41 +12908,7 @@ This path may or may not be writable by the current application.
             arParams.push(JSON.stringify(term));
             arParams.push(JSON.stringify(filter));
             var apiRequest = new APIRequest("IContact", "searchContactsWithFilter", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredContactResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                        callback.onError(IContactResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ContactBridge.searchContactsWithFilter' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                    callback.onError(IContactResultCallbackError.Unknown);
-                    console.error("ERROR: 'ContactBridge.searchContactsWithFilter' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredContactResultCallback.remove("" + callback.getId());
-                callback.onError(IContactResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'ContactBridge.searchContactsWithFilter' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredContactResultCallback);
         };
         /**
            @method
@@ -14013,33 +12925,12 @@ This path may or may not be writable by the current application.
             arParams.push(JSON.stringify(contact));
             arParams.push(JSON.stringify(pngImage));
             var apiRequest = new APIRequest("IContact", "setContactPhoto", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'ContactBridge.setContactPhoto' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'ContactBridge.setContactPhoto' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'ContactBridge.setContactPhoto' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -14076,41 +12967,7 @@ This path may or may not be writable by the current application.
             var arParams = [];
             arParams.push(JSON.stringify(data));
             var apiRequest = new APIRequest("IMail", "sendEmail", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredMessagingCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredMessagingCallback.remove("" + callback.getId());
-                        callback.onError(IMessagingCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'MailBridge.sendEmail' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredMessagingCallback.remove("" + callback.getId());
-                    callback.onError(IMessagingCallbackError.Unknown);
-                    console.error("ERROR: 'MailBridge.sendEmail' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredMessagingCallback.remove("" + callback.getId());
-                callback.onError(IMessagingCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'MailBridge.sendEmail' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredMessagingCallback);
         };
         return MailBridge;
     })(BasePIMBridge);
@@ -14147,41 +13004,7 @@ This path may or may not be writable by the current application.
             arParams.push(JSON.stringify(number));
             arParams.push(JSON.stringify(text));
             var apiRequest = new APIRequest("IMessaging", "sendSMS", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredMessagingCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredMessagingCallback.remove("" + callback.getId());
-                        callback.onError(IMessagingCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'MessagingBridge.sendSMS' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredMessagingCallback.remove("" + callback.getId());
-                    callback.onError(IMessagingCallbackError.Unknown);
-                    console.error("ERROR: 'MessagingBridge.sendSMS' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredMessagingCallback.remove("" + callback.getId());
-                callback.onError(IMessagingCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'MessagingBridge.sendSMS' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredMessagingCallback);
         };
         return MessagingBridge;
     })(BasePIMBridge);
@@ -14338,41 +13161,7 @@ This path may or may not be writable by the current application.
             arParams.push(JSON.stringify(keys));
             arParams.push(JSON.stringify(publicAccessName));
             var apiRequest = new APIRequest("ISecurity", "deleteSecureKeyValuePairs", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredSecurityResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                        callback.onError(ISecurityResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'SecurityBridge.deleteSecureKeyValuePairs' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                    callback.onError(ISecurityResultCallbackError.Unknown);
-                    console.error("ERROR: 'SecurityBridge.deleteSecureKeyValuePairs' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                callback.onError(ISecurityResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'SecurityBridge.deleteSecureKeyValuePairs' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredSecurityResultCallback);
         };
         /**
            @method
@@ -14389,41 +13178,7 @@ This path may or may not be writable by the current application.
             arParams.push(JSON.stringify(keys));
             arParams.push(JSON.stringify(publicAccessName));
             var apiRequest = new APIRequest("ISecurity", "getSecureKeyValuePairs", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredSecurityResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                        callback.onError(ISecurityResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'SecurityBridge.getSecureKeyValuePairs' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                    callback.onError(ISecurityResultCallbackError.Unknown);
-                    console.error("ERROR: 'SecurityBridge.getSecureKeyValuePairs' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                callback.onError(ISecurityResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'SecurityBridge.getSecureKeyValuePairs' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredSecurityResultCallback);
         };
         /**
            @method
@@ -14436,33 +13191,12 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("ISecurity", "isDeviceModified", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'SecurityBridge.isDeviceModified' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'SecurityBridge.isDeviceModified' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'SecurityBridge.isDeviceModified' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -14481,41 +13215,7 @@ This path may or may not be writable by the current application.
             arParams.push(JSON.stringify(keyValues));
             arParams.push(JSON.stringify(publicAccessName));
             var apiRequest = new APIRequest("ISecurity", "setSecureKeyValuePairs", arParams, callback.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add callback reference to local dictionary.
-            Adaptive.registeredSecurityResultCallback.add("" + callback.getId(), callback);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove callback reference from local dictionary due to invalid response.
-                        Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                        callback.onError(ISecurityResultCallbackError.Unknown);
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'SecurityBridge.setSecureKeyValuePairs' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove callback reference from local dictionary due to invalid response.
-                    Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                    callback.onError(ISecurityResultCallbackError.Unknown);
-                    console.error("ERROR: 'SecurityBridge.setSecureKeyValuePairs' incorrect response received.");
-                }
-            }
-            else {
-                // Unknown error - remove from dictionary and notify callback.
-                Adaptive.registeredSecurityResultCallback.remove("" + callback.getId());
-                callback.onError(ISecurityResultCallbackError.Unknown);
-                console.error("ERROR: " + xhr.status + " sending 'SecurityBridge.setSecureKeyValuePairs' request.");
-            }
+            postRequestCallback(apiRequest, callback, Adaptive.registeredSecurityResultCallback);
         };
         return SecurityBridge;
     })(BaseSecurityBridge);
@@ -14548,38 +13248,7 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IAcceleration", "addAccelerationListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add listener reference to local dictionary.
-            Adaptive.registeredAccelerationListener.add("" + listener.getId(), listener);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove listener reference from local dictionary due to invalid response.
-                        Adaptive.registeredAccelerationListener.remove("" + listener.getId());
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'AccelerationBridge.addAccelerationListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove listener reference from local dictionary due to invalid response.
-                    Adaptive.registeredAccelerationListener.remove("" + listener.getId());
-                    console.error("ERROR: 'AccelerationBridge.addAccelerationListener' incorrect response received.");
-                }
-            }
-            else {
-                // Remove listener reference from local dictionary due to invalid response.
-                Adaptive.registeredAccelerationListener.remove("" + listener.getId());
-                console.error("ERROR: " + xhr.status + " sending 'AccelerationBridge.addAccelerationListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredAccelerationListener);
         };
         /**
            @method
@@ -14592,32 +13261,7 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IAcceleration", "removeAccelerationListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove listener reference from local dictionary.
-                        Adaptive.registeredAccelerationListener.remove("" + listener.getId());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'AccelerationBridge.removeAccelerationListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'AccelerationBridge.removeAccelerationListener' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'AccelerationBridge.removeAccelerationListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredAccelerationListener);
         };
         /**
            @method
@@ -14629,35 +13273,7 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IAcceleration", "removeAccelerationListeners", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove all listeners references from local dictionary.
-                        var keys = Adaptive.registeredAccelerationListener.keys();
-                        for (var key in keys) {
-                            Adaptive.registeredAccelerationListener.remove(key);
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'AccelerationBridge.removeAccelerationListeners' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'AccelerationBridge.removeAccelerationListeners' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'AccelerationBridge.removeAccelerationListeners' request.");
-            }
+            postRequestListener(apiRequest, null, Adaptive.registeredAccelerationListener);
         };
         return AccelerationBridge;
     })(BaseSensorBridge);
@@ -14730,38 +13346,7 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IGeolocation", "addGeolocationListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add listener reference to local dictionary.
-            Adaptive.registeredGeolocationListener.add("" + listener.getId(), listener);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove listener reference from local dictionary due to invalid response.
-                        Adaptive.registeredGeolocationListener.remove("" + listener.getId());
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'GeolocationBridge.addGeolocationListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove listener reference from local dictionary due to invalid response.
-                    Adaptive.registeredGeolocationListener.remove("" + listener.getId());
-                    console.error("ERROR: 'GeolocationBridge.addGeolocationListener' incorrect response received.");
-                }
-            }
-            else {
-                // Remove listener reference from local dictionary due to invalid response.
-                Adaptive.registeredGeolocationListener.remove("" + listener.getId());
-                console.error("ERROR: " + xhr.status + " sending 'GeolocationBridge.addGeolocationListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredGeolocationListener);
         };
         /**
            @method
@@ -14774,32 +13359,7 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IGeolocation", "removeGeolocationListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove listener reference from local dictionary.
-                        Adaptive.registeredGeolocationListener.remove("" + listener.getId());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'GeolocationBridge.removeGeolocationListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'GeolocationBridge.removeGeolocationListener' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'GeolocationBridge.removeGeolocationListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredGeolocationListener);
         };
         /**
            @method
@@ -14811,35 +13371,7 @@ This path may or may not be writable by the current application.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IGeolocation", "removeGeolocationListeners", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove all listeners references from local dictionary.
-                        var keys = Adaptive.registeredGeolocationListener.keys();
-                        for (var key in keys) {
-                            Adaptive.registeredGeolocationListener.remove(key);
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'GeolocationBridge.removeGeolocationListeners' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'GeolocationBridge.removeGeolocationListeners' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'GeolocationBridge.removeGeolocationListeners' request.");
-            }
+            postRequestListener(apiRequest, null, Adaptive.registeredGeolocationListener);
         };
         return GeolocationBridge;
     })(BaseSensorBridge);
@@ -15034,33 +13566,12 @@ changes please use the IDevice and IDisplay functions and listeners API respecti
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("ICapabilities", "getOrientationDefault", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = ICapabilitiesOrientation.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.getOrientationDefault' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.getOrientationDefault' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.getOrientationDefault' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = ICapabilitiesOrientation.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -15076,37 +13587,16 @@ support at least one orientation. This is usually PortaitUp.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("ICapabilities", "getOrientationsSupported", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = new Array();
-                        var responseArray = JSON.parse(apiResponse.getResponse());
-                        for (var __key__ in responseArray) {
-                            response.push(ICapabilitiesOrientation.toObject(responseArray[__key__]));
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.getOrientationsSupported' [" + apiResponse.getStatusMessage() + "].");
-                    }
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = new Array();
+                var responseArray = JSON.parse(apiResponse.getResponse());
+                for (var i = 0; i < responseArray.length; i++) {
+                    response.push(ICapabilitiesOrientation.toObject(responseArray[i]));
                 }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.getOrientationsSupported' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.getOrientationsSupported' request.");
             }
             return response;
         };
@@ -15123,33 +13613,12 @@ support at least one orientation. This is usually PortaitUp.
             var arParams = [];
             arParams.push(JSON.stringify(type));
             var apiRequest = new APIRequest("ICapabilities", "hasButtonSupport", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.hasButtonSupport' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.hasButtonSupport' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.hasButtonSupport' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -15167,33 +13636,12 @@ the device.
             var arParams = [];
             arParams.push(JSON.stringify(type));
             var apiRequest = new APIRequest("ICapabilities", "hasCommunicationSupport", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.hasCommunicationSupport' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.hasCommunicationSupport' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.hasCommunicationSupport' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -15210,33 +13658,12 @@ the device.
             var arParams = [];
             arParams.push(JSON.stringify(type));
             var apiRequest = new APIRequest("ICapabilities", "hasDataSupport", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.hasDataSupport' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.hasDataSupport' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.hasDataSupport' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -15254,33 +13681,12 @@ device.
             var arParams = [];
             arParams.push(JSON.stringify(type));
             var apiRequest = new APIRequest("ICapabilities", "hasMediaSupport", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.hasMediaSupport' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.hasMediaSupport' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.hasMediaSupport' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -15297,33 +13703,12 @@ device.
             var arParams = [];
             arParams.push(JSON.stringify(type));
             var apiRequest = new APIRequest("ICapabilities", "hasNetSupport", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.hasNetSupport' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.hasNetSupport' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.hasNetSupport' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -15341,33 +13726,12 @@ device.
             var arParams = [];
             arParams.push(JSON.stringify(type));
             var apiRequest = new APIRequest("ICapabilities", "hasNotificationSupport", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.hasNotificationSupport' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.hasNotificationSupport' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.hasNotificationSupport' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -15384,33 +13748,12 @@ device.
             var arParams = [];
             arParams.push(JSON.stringify(orientation));
             var apiRequest = new APIRequest("ICapabilities", "hasOrientationSupport", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.hasOrientationSupport' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.hasOrientationSupport' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.hasOrientationSupport' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -15428,33 +13771,12 @@ device.
             var arParams = [];
             arParams.push(JSON.stringify(type));
             var apiRequest = new APIRequest("ICapabilities", "hasSensorSupport", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'CapabilitiesBridge.hasSensorSupport' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'CapabilitiesBridge.hasSensorSupport' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'CapabilitiesBridge.hasSensorSupport' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -15489,38 +13811,7 @@ device.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "addButtonListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add listener reference to local dictionary.
-            Adaptive.registeredButtonListener.add("" + listener.getId(), listener);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove listener reference from local dictionary due to invalid response.
-                        Adaptive.registeredButtonListener.remove("" + listener.getId());
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.addButtonListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove listener reference from local dictionary due to invalid response.
-                    Adaptive.registeredButtonListener.remove("" + listener.getId());
-                    console.error("ERROR: 'DeviceBridge.addButtonListener' incorrect response received.");
-                }
-            }
-            else {
-                // Remove listener reference from local dictionary due to invalid response.
-                Adaptive.registeredButtonListener.remove("" + listener.getId());
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.addButtonListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredButtonListener);
         };
         /**
            @method
@@ -15533,38 +13824,7 @@ device.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "addDeviceOrientationListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add listener reference to local dictionary.
-            Adaptive.registeredDeviceOrientationListener.add("" + listener.getId(), listener);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove listener reference from local dictionary due to invalid response.
-                        Adaptive.registeredDeviceOrientationListener.remove("" + listener.getId());
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.addDeviceOrientationListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove listener reference from local dictionary due to invalid response.
-                    Adaptive.registeredDeviceOrientationListener.remove("" + listener.getId());
-                    console.error("ERROR: 'DeviceBridge.addDeviceOrientationListener' incorrect response received.");
-                }
-            }
-            else {
-                // Remove listener reference from local dictionary due to invalid response.
-                Adaptive.registeredDeviceOrientationListener.remove("" + listener.getId());
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.addDeviceOrientationListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredDeviceOrientationListener);
         };
         /**
            @method
@@ -15577,33 +13837,12 @@ device.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "getDeviceInfo", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = DeviceInfo.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.getDeviceInfo' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DeviceBridge.getDeviceInfo' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.getDeviceInfo' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = DeviceInfo.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -15618,33 +13857,12 @@ device.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "getLocaleCurrent", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = Locale.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.getLocaleCurrent' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DeviceBridge.getLocaleCurrent' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.getLocaleCurrent' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = Locale.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -15660,33 +13878,12 @@ of the display. For display orientation, use the IDisplay APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "getOrientationCurrent", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = ICapabilitiesOrientation.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.getOrientationCurrent' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DeviceBridge.getOrientationCurrent' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.getOrientationCurrent' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = ICapabilitiesOrientation.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -15701,32 +13898,7 @@ of the display. For display orientation, use the IDisplay APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "removeButtonListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove listener reference from local dictionary.
-                        Adaptive.registeredButtonListener.remove("" + listener.getId());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.removeButtonListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DeviceBridge.removeButtonListener' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.removeButtonListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredButtonListener);
         };
         /**
            @method
@@ -15738,35 +13910,7 @@ of the display. For display orientation, use the IDisplay APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "removeButtonListeners", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove all listeners references from local dictionary.
-                        var keys = Adaptive.registeredButtonListener.keys();
-                        for (var key in keys) {
-                            Adaptive.registeredButtonListener.remove(key);
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.removeButtonListeners' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DeviceBridge.removeButtonListeners' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.removeButtonListeners' request.");
-            }
+            postRequestListener(apiRequest, null, Adaptive.registeredButtonListener);
         };
         /**
            @method
@@ -15779,32 +13923,7 @@ of the display. For display orientation, use the IDisplay APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "removeDeviceOrientationListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove listener reference from local dictionary.
-                        Adaptive.registeredDeviceOrientationListener.remove("" + listener.getId());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.removeDeviceOrientationListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DeviceBridge.removeDeviceOrientationListener' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.removeDeviceOrientationListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredDeviceOrientationListener);
         };
         /**
            @method
@@ -15816,35 +13935,7 @@ of the display. For display orientation, use the IDisplay APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDevice", "removeDeviceOrientationListeners", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove all listeners references from local dictionary.
-                        var keys = Adaptive.registeredDeviceOrientationListener.keys();
-                        for (var key in keys) {
-                            Adaptive.registeredDeviceOrientationListener.remove(key);
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DeviceBridge.removeDeviceOrientationListeners' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DeviceBridge.removeDeviceOrientationListeners' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DeviceBridge.removeDeviceOrientationListeners' request.");
-            }
+            postRequestListener(apiRequest, null, Adaptive.registeredDeviceOrientationListener);
         };
         return DeviceBridge;
     })(BaseSystemBridge);
@@ -15877,38 +13968,7 @@ of the display. For display orientation, use the IDisplay APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDisplay", "addDisplayOrientationListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // Add listener reference to local dictionary.
-            Adaptive.registeredDisplayOrientationListener.add("" + listener.getId(), listener);
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                    }
-                    else {
-                        // Remove listener reference from local dictionary due to invalid response.
-                        Adaptive.registeredDisplayOrientationListener.remove("" + listener.getId());
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DisplayBridge.addDisplayOrientationListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    // Remove listener reference from local dictionary due to invalid response.
-                    Adaptive.registeredDisplayOrientationListener.remove("" + listener.getId());
-                    console.error("ERROR: 'DisplayBridge.addDisplayOrientationListener' incorrect response received.");
-                }
-            }
-            else {
-                // Remove listener reference from local dictionary due to invalid response.
-                Adaptive.registeredDisplayOrientationListener.remove("" + listener.getId());
-                console.error("ERROR: " + xhr.status + " sending 'DisplayBridge.addDisplayOrientationListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredDisplayOrientationListener);
         };
         /**
            @method
@@ -15922,33 +13982,12 @@ of the device. For device orientation, use the IDevice APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDisplay", "getOrientationCurrent", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = ICapabilitiesOrientation.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DisplayBridge.getOrientationCurrent' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DisplayBridge.getOrientationCurrent' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DisplayBridge.getOrientationCurrent' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = ICapabilitiesOrientation.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -15963,32 +14002,7 @@ of the device. For device orientation, use the IDevice APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDisplay", "removeDisplayOrientationListener", arParams, listener.getId());
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove listener reference from local dictionary.
-                        Adaptive.registeredDisplayOrientationListener.remove("" + listener.getId());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DisplayBridge.removeDisplayOrientationListener' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DisplayBridge.removeDisplayOrientationListener' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DisplayBridge.removeDisplayOrientationListener' request.");
-            }
+            postRequestListener(apiRequest, listener, Adaptive.registeredDisplayOrientationListener);
         };
         /**
            @method
@@ -16000,35 +14014,7 @@ of the device. For device orientation, use the IDevice APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IDisplay", "removeDisplayOrientationListeners", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        // Remove all listeners references from local dictionary.
-                        var keys = Adaptive.registeredDisplayOrientationListener.keys();
-                        for (var key in keys) {
-                            Adaptive.registeredDisplayOrientationListener.remove(key);
-                        }
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'DisplayBridge.removeDisplayOrientationListeners' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'DisplayBridge.removeDisplayOrientationListeners' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'DisplayBridge.removeDisplayOrientationListeners' request.");
-            }
+            postRequestListener(apiRequest, null, Adaptive.registeredDisplayOrientationListener);
         };
         return DisplayBridge;
     })(BaseSystemBridge);
@@ -16061,33 +14047,12 @@ of the device. For device orientation, use the IDevice APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IOS", "getOSInfo", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = null;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = OSInfo.toObject(JSON.parse(apiResponse.getResponse()));
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'OSBridge.getOSInfo' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'OSBridge.getOSInfo' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'OSBridge.getOSInfo' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = OSInfo.toObject(JSON.parse(apiResponse.getResponse()));
             }
             return response;
         };
@@ -16121,19 +14086,7 @@ of the device. For device orientation, use the IDevice APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IRuntime", "dismissApplication", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'RuntimeBridge.dismissApplication' request.");
-            }
+            postRequest(apiRequest);
         };
         /**
            @method
@@ -16146,33 +14099,12 @@ of the device. For device orientation, use the IDevice APIs.
             // Create and populate API request.
             var arParams = [];
             var apiRequest = new APIRequest("IRuntime", "dismissSplashScreen", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'RuntimeBridge.dismissSplashScreen' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'RuntimeBridge.dismissSplashScreen' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'RuntimeBridge.dismissSplashScreen' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -16209,33 +14141,12 @@ of the device. For device orientation, use the IDevice APIs.
             var arParams = [];
             arParams.push(JSON.stringify(url));
             var apiRequest = new APIRequest("IBrowser", "openExtenalBrowser", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'BrowserBridge.openExtenalBrowser' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'BrowserBridge.openExtenalBrowser' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'BrowserBridge.openExtenalBrowser' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -16256,33 +14167,12 @@ of the device. For device orientation, use the IDevice APIs.
             arParams.push(JSON.stringify(title));
             arParams.push(JSON.stringify(backButtonText));
             var apiRequest = new APIRequest("IBrowser", "openInternalBrowser", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'BrowserBridge.openInternalBrowser' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'BrowserBridge.openInternalBrowser' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'BrowserBridge.openInternalBrowser' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -16303,33 +14193,12 @@ of the device. For device orientation, use the IDevice APIs.
             arParams.push(JSON.stringify(title));
             arParams.push(JSON.stringify(backButtonText));
             var apiRequest = new APIRequest("IBrowser", "openInternalBrowserModal", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
+            var apiResponse = postRequest(apiRequest);
             // Prepare response.
             var response = false;
             // Check response.
-            if (xhr.status == 200) {
-                // Process response.
-                if (xhr.responseText != null && xhr.responseText != '') {
-                    apiResponse = APIResponse.toObject(JSON.parse(xhr.responseText));
-                    if (apiResponse != null && apiResponse.getStatusCode() == 200) {
-                        response = JSON.parse(apiResponse.getResponse());
-                    }
-                    else {
-                        console.error("ERROR: " + apiResponse.getStatusCode() + " receiving response in 'BrowserBridge.openInternalBrowserModal' [" + apiResponse.getStatusMessage() + "].");
-                    }
-                }
-                else {
-                    console.error("ERROR: 'BrowserBridge.openInternalBrowserModal' incorrect response received.");
-                }
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'BrowserBridge.openInternalBrowserModal' request.");
+            if (apiResponse != null && apiResponse.getStatusCode() === 200) {
+                response = JSON.parse(apiResponse.getResponse());
             }
             return response;
         };
@@ -16480,25 +14349,13 @@ of the device. For device orientation, use the IDevice APIs.
            @param message Message to be logged
            @since v2.0
         */
-        LoggingBridge.prototype.log_level_message = function (level, message) {
+        LoggingBridge.prototype.logLevelMessage = function (level, message) {
             // Create and populate API request.
             var arParams = [];
             arParams.push(JSON.stringify(level));
             arParams.push(JSON.stringify(message));
-            var apiRequest = new APIRequest("ILogging", "log_level_message", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'LoggingBridge.log_level_message' request.");
-            }
+            var apiRequest = new APIRequest("ILogging", "logLevelMessage", arParams, -1);
+            postRequest(apiRequest);
         };
         /**
            Logs the given message, with the given log level if specified, to the standard platform/environment.
@@ -16508,26 +14365,14 @@ of the device. For device orientation, use the IDevice APIs.
            @param message  Message to be logged
            @since v2.0
         */
-        LoggingBridge.prototype.log_level_category_message = function (level, category, message) {
+        LoggingBridge.prototype.logLevelCategoryMessage = function (level, category, message) {
             // Create and populate API request.
             var arParams = [];
             arParams.push(JSON.stringify(level));
             arParams.push(JSON.stringify(category));
             arParams.push(JSON.stringify(message));
-            var apiRequest = new APIRequest("ILogging", "log_level_category_message", arParams, -1);
-            apiRequest.setApiVersion("v2.1.5");
-            var apiResponse = new APIResponse("", 200, "");
-            // Create and send JSON request.
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", Adaptive.bridgePath, false);
-            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            xhr.send(JSON.stringify(apiRequest));
-            // Check response.
-            if (xhr.status == 200) {
-            }
-            else {
-                console.error("ERROR: " + xhr.status + " sending 'LoggingBridge.log_level_category_message' request.");
-            }
+            var apiRequest = new APIRequest("ILogging", "logLevelCategoryMessage", arParams, -1);
+            postRequest(apiRequest);
         };
         return LoggingBridge;
     })(BaseUtilBridge);
@@ -17422,7 +15267,7 @@ of the device. For device orientation, use the IDevice APIs.
            @return {string} The version of the API.
         */
         AppRegistryBridge.prototype.getAPIVersion = function () {
-            return "v2.1.5";
+            return "v2.2.0";
         };
         /**
            @private
@@ -17802,23 +15647,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ContactAddressType}
         */
         ContactAddressType.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Home":
-                        return ContactAddressType.Home;
-                    case "Work":
-                        return ContactAddressType.Work;
-                    case "Other":
-                        return ContactAddressType.Other;
-                    case "Unknown":
-                        return ContactAddressType.Unknown;
-                    default:
-                        return ContactAddressType.Unknown;
-                }
+            var retValue = ContactAddressType.Unknown;
+            if (object != null && object.value != null && ContactAddressType.hasOwnProperty(object.value)) {
+                retValue = ContactAddressType[object.value];
             }
-            else {
-                return ContactAddressType.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ContactAddressType} [Home='Home']
@@ -17857,23 +15690,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ContactEmailType}
         */
         ContactEmailType.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Personal":
-                        return ContactEmailType.Personal;
-                    case "Work":
-                        return ContactEmailType.Work;
-                    case "Other":
-                        return ContactEmailType.Other;
-                    case "Unknown":
-                        return ContactEmailType.Unknown;
-                    default:
-                        return ContactEmailType.Unknown;
-                }
+            var retValue = ContactEmailType.Unknown;
+            if (object != null && object.value != null && ContactEmailType.hasOwnProperty(object.value)) {
+                retValue = ContactEmailType[object.value];
             }
-            else {
-                return ContactEmailType.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ContactEmailType} [Personal='Personal']
@@ -17912,25 +15733,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ContactPersonalInfoTitle}
         */
         ContactPersonalInfoTitle.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Mr":
-                        return ContactPersonalInfoTitle.Mr;
-                    case "Mrs":
-                        return ContactPersonalInfoTitle.Mrs;
-                    case "Ms":
-                        return ContactPersonalInfoTitle.Ms;
-                    case "Dr":
-                        return ContactPersonalInfoTitle.Dr;
-                    case "Unknown":
-                        return ContactPersonalInfoTitle.Unknown;
-                    default:
-                        return ContactPersonalInfoTitle.Unknown;
-                }
+            var retValue = ContactPersonalInfoTitle.Unknown;
+            if (object != null && object.value != null && ContactPersonalInfoTitle.hasOwnProperty(object.value)) {
+                retValue = ContactPersonalInfoTitle[object.value];
             }
-            else {
-                return ContactPersonalInfoTitle.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ContactPersonalInfoTitle} [Mr='Mr']
@@ -17973,31 +15780,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ContactPhoneType}
         */
         ContactPhoneType.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Mobile":
-                        return ContactPhoneType.Mobile;
-                    case "Work":
-                        return ContactPhoneType.Work;
-                    case "Home":
-                        return ContactPhoneType.Home;
-                    case "Main":
-                        return ContactPhoneType.Main;
-                    case "HomeFax":
-                        return ContactPhoneType.HomeFax;
-                    case "WorkFax":
-                        return ContactPhoneType.WorkFax;
-                    case "Other":
-                        return ContactPhoneType.Other;
-                    case "Unknown":
-                        return ContactPhoneType.Unknown;
-                    default:
-                        return ContactPhoneType.Unknown;
-                }
+            var retValue = ContactPhoneType.Unknown;
+            if (object != null && object.value != null && ContactPhoneType.hasOwnProperty(object.value)) {
+                retValue = ContactPhoneType[object.value];
             }
-            else {
-                return ContactPhoneType.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ContactPhoneType} [Mobile='Mobile']
@@ -18052,27 +15839,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ContactSocialNetwork}
         */
         ContactSocialNetwork.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Twitter":
-                        return ContactSocialNetwork.Twitter;
-                    case "Facebook":
-                        return ContactSocialNetwork.Facebook;
-                    case "GooglePlus":
-                        return ContactSocialNetwork.GooglePlus;
-                    case "LinkedIn":
-                        return ContactSocialNetwork.LinkedIn;
-                    case "Flickr":
-                        return ContactSocialNetwork.Flickr;
-                    case "Unknown":
-                        return ContactSocialNetwork.Unknown;
-                    default:
-                        return ContactSocialNetwork.Unknown;
-                }
+            var retValue = ContactSocialNetwork.Unknown;
+            if (object != null && object.value != null && ContactSocialNetwork.hasOwnProperty(object.value)) {
+                retValue = ContactSocialNetwork[object.value];
             }
-            else {
-                return ContactSocialNetwork.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ContactSocialNetwork} [Twitter='Twitter']
@@ -18119,21 +15890,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IAccelerationListenerError}
         */
         IAccelerationListenerError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Unauthorized":
-                        return IAccelerationListenerError.Unauthorized;
-                    case "Unavailable":
-                        return IAccelerationListenerError.Unavailable;
-                    case "Unknown":
-                        return IAccelerationListenerError.Unknown;
-                    default:
-                        return IAccelerationListenerError.Unknown;
-                }
+            var retValue = IAccelerationListenerError.Unknown;
+            if (object != null && object.value != null && IAccelerationListenerError.hasOwnProperty(object.value)) {
+                retValue = IAccelerationListenerError[object.value];
             }
-            else {
-                return IAccelerationListenerError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IAccelerationListenerError} [Unauthorized='Unauthorized']
@@ -18168,21 +15929,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IAccelerationListenerWarning}
         */
         IAccelerationListenerWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "NeedsCalibration":
-                        return IAccelerationListenerWarning.NeedsCalibration;
-                    case "Stale":
-                        return IAccelerationListenerWarning.Stale;
-                    case "Unknown":
-                        return IAccelerationListenerWarning.Unknown;
-                    default:
-                        return IAccelerationListenerWarning.Unknown;
-                }
+            var retValue = IAccelerationListenerWarning.Unknown;
+            if (object != null && object.value != null && IAccelerationListenerWarning.hasOwnProperty(object.value)) {
+                retValue = IAccelerationListenerWarning[object.value];
             }
-            else {
-                return IAccelerationListenerWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IAccelerationListenerWarning} [NeedsCalibration='NeedsCalibration']
@@ -18217,47 +15968,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IAdaptiveRPGroup}
         */
         IAdaptiveRPGroup.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Application":
-                        return IAdaptiveRPGroup.Application;
-                    case "Commerce":
-                        return IAdaptiveRPGroup.Commerce;
-                    case "Communication":
-                        return IAdaptiveRPGroup.Communication;
-                    case "Data":
-                        return IAdaptiveRPGroup.Data;
-                    case "Media":
-                        return IAdaptiveRPGroup.Media;
-                    case "Notification":
-                        return IAdaptiveRPGroup.Notification;
-                    case "PIM":
-                        return IAdaptiveRPGroup.PIM;
-                    case "Reader":
-                        return IAdaptiveRPGroup.Reader;
-                    case "Security":
-                        return IAdaptiveRPGroup.Security;
-                    case "Sensor":
-                        return IAdaptiveRPGroup.Sensor;
-                    case "Social":
-                        return IAdaptiveRPGroup.Social;
-                    case "System":
-                        return IAdaptiveRPGroup.System;
-                    case "UI":
-                        return IAdaptiveRPGroup.UI;
-                    case "Util":
-                        return IAdaptiveRPGroup.Util;
-                    case "Kernel":
-                        return IAdaptiveRPGroup.Kernel;
-                    case "Unknown":
-                        return IAdaptiveRPGroup.Unknown;
-                    default:
-                        return IAdaptiveRPGroup.Unknown;
-                }
+            var retValue = IAdaptiveRPGroup.Unknown;
+            if (object != null && object.value != null && IAdaptiveRPGroup.hasOwnProperty(object.value)) {
+                retValue = IAdaptiveRPGroup[object.value];
             }
-            else {
-                return IAdaptiveRPGroup.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IAdaptiveRPGroup} [Application='Application']
@@ -18344,24 +16059,16 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IButtonListenerError}
         */
         IButtonListenerError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Not_Present":
-                        return IButtonListenerError.Not_Present;
-                    case "Unknown":
-                        return IButtonListenerError.Unknown;
-                    default:
-                        return IButtonListenerError.Unknown;
-                }
+            var retValue = IButtonListenerError.Unknown;
+            if (object != null && object.value != null && IButtonListenerError.hasOwnProperty(object.value)) {
+                retValue = IButtonListenerError[object.value];
             }
-            else {
-                return IButtonListenerError.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.IButtonListenerError} [Not_Present='Not_Present']
+           @property {Adaptive.IButtonListenerError} [NotPresent='NotPresent']
         */
-        IButtonListenerError.Not_Present = new IButtonListenerError("Not_Present");
+        IButtonListenerError.NotPresent = new IButtonListenerError("NotPresent");
         /**
            @property {Adaptive.IButtonListenerError} [Unknown='Unknown']
         */
@@ -18387,24 +16094,16 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IButtonListenerWarning}
         */
         IButtonListenerWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Not_Implemented":
-                        return IButtonListenerWarning.Not_Implemented;
-                    case "Unknown":
-                        return IButtonListenerWarning.Unknown;
-                    default:
-                        return IButtonListenerWarning.Unknown;
-                }
+            var retValue = IButtonListenerWarning.Unknown;
+            if (object != null && object.value != null && IButtonListenerWarning.hasOwnProperty(object.value)) {
+                retValue = IButtonListenerWarning[object.value];
             }
-            else {
-                return IButtonListenerWarning.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.IButtonListenerWarning} [Not_Implemented='Not_Implemented']
+           @property {Adaptive.IButtonListenerWarning} [NotImplemented='NotImplemented']
         */
-        IButtonListenerWarning.Not_Implemented = new IButtonListenerWarning("Not_Implemented");
+        IButtonListenerWarning.NotImplemented = new IButtonListenerWarning("NotImplemented");
         /**
            @property {Adaptive.IButtonListenerWarning} [Unknown='Unknown']
         */
@@ -18430,23 +16129,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ICapabilitiesButton}
         */
         ICapabilitiesButton.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "HomeButton":
-                        return ICapabilitiesButton.HomeButton;
-                    case "BackButton":
-                        return ICapabilitiesButton.BackButton;
-                    case "OptionButton":
-                        return ICapabilitiesButton.OptionButton;
-                    case "Unknown":
-                        return ICapabilitiesButton.Unknown;
-                    default:
-                        return ICapabilitiesButton.Unknown;
-                }
+            var retValue = ICapabilitiesButton.Unknown;
+            if (object != null && object.value != null && ICapabilitiesButton.hasOwnProperty(object.value)) {
+                retValue = ICapabilitiesButton[object.value];
             }
-            else {
-                return ICapabilitiesButton.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ICapabilitiesButton} [HomeButton='HomeButton']
@@ -18485,27 +16172,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ICapabilitiesCommunication}
         */
         ICapabilitiesCommunication.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Calendar":
-                        return ICapabilitiesCommunication.Calendar;
-                    case "Contact":
-                        return ICapabilitiesCommunication.Contact;
-                    case "Mail":
-                        return ICapabilitiesCommunication.Mail;
-                    case "Messaging":
-                        return ICapabilitiesCommunication.Messaging;
-                    case "Telephony":
-                        return ICapabilitiesCommunication.Telephony;
-                    case "Unknown":
-                        return ICapabilitiesCommunication.Unknown;
-                    default:
-                        return ICapabilitiesCommunication.Unknown;
-                }
+            var retValue = ICapabilitiesCommunication.Unknown;
+            if (object != null && object.value != null && ICapabilitiesCommunication.hasOwnProperty(object.value)) {
+                retValue = ICapabilitiesCommunication[object.value];
             }
-            else {
-                return ICapabilitiesCommunication.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ICapabilitiesCommunication} [Calendar='Calendar']
@@ -18552,23 +16223,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ICapabilitiesData}
         */
         ICapabilitiesData.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Database":
-                        return ICapabilitiesData.Database;
-                    case "File":
-                        return ICapabilitiesData.File;
-                    case "Cloud":
-                        return ICapabilitiesData.Cloud;
-                    case "Unknown":
-                        return ICapabilitiesData.Unknown;
-                    default:
-                        return ICapabilitiesData.Unknown;
-                }
+            var retValue = ICapabilitiesData.Unknown;
+            if (object != null && object.value != null && ICapabilitiesData.hasOwnProperty(object.value)) {
+                retValue = ICapabilitiesData[object.value];
             }
-            else {
-                return ICapabilitiesData.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ICapabilitiesData} [Database='Database']
@@ -18607,48 +16266,32 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ICapabilitiesMedia}
         */
         ICapabilitiesMedia.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Audio_Playback":
-                        return ICapabilitiesMedia.Audio_Playback;
-                    case "Audio_Recording":
-                        return ICapabilitiesMedia.Audio_Recording;
-                    case "Camera":
-                        return ICapabilitiesMedia.Camera;
-                    case "Video_Playback":
-                        return ICapabilitiesMedia.Video_Playback;
-                    case "Video_Recording":
-                        return ICapabilitiesMedia.Video_Recording;
-                    case "Unknown":
-                        return ICapabilitiesMedia.Unknown;
-                    default:
-                        return ICapabilitiesMedia.Unknown;
-                }
+            var retValue = ICapabilitiesMedia.Unknown;
+            if (object != null && object.value != null && ICapabilitiesMedia.hasOwnProperty(object.value)) {
+                retValue = ICapabilitiesMedia[object.value];
             }
-            else {
-                return ICapabilitiesMedia.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.ICapabilitiesMedia} [Audio_Playback='Audio_Playback']
+           @property {Adaptive.ICapabilitiesMedia} [AudioPlayback='AudioPlayback']
         */
-        ICapabilitiesMedia.Audio_Playback = new ICapabilitiesMedia("Audio_Playback");
+        ICapabilitiesMedia.AudioPlayback = new ICapabilitiesMedia("AudioPlayback");
         /**
-           @property {Adaptive.ICapabilitiesMedia} [Audio_Recording='Audio_Recording']
+           @property {Adaptive.ICapabilitiesMedia} [AudioRecording='AudioRecording']
         */
-        ICapabilitiesMedia.Audio_Recording = new ICapabilitiesMedia("Audio_Recording");
+        ICapabilitiesMedia.AudioRecording = new ICapabilitiesMedia("AudioRecording");
         /**
            @property {Adaptive.ICapabilitiesMedia} [Camera='Camera']
         */
         ICapabilitiesMedia.Camera = new ICapabilitiesMedia("Camera");
         /**
-           @property {Adaptive.ICapabilitiesMedia} [Video_Playback='Video_Playback']
+           @property {Adaptive.ICapabilitiesMedia} [VideoPlayback='VideoPlayback']
         */
-        ICapabilitiesMedia.Video_Playback = new ICapabilitiesMedia("Video_Playback");
+        ICapabilitiesMedia.VideoPlayback = new ICapabilitiesMedia("VideoPlayback");
         /**
-           @property {Adaptive.ICapabilitiesMedia} [Video_Recording='Video_Recording']
+           @property {Adaptive.ICapabilitiesMedia} [VideoRecording='VideoRecording']
         */
-        ICapabilitiesMedia.Video_Recording = new ICapabilitiesMedia("Video_Recording");
+        ICapabilitiesMedia.VideoRecording = new ICapabilitiesMedia("VideoRecording");
         /**
            @property {Adaptive.ICapabilitiesMedia} [Unknown='Unknown']
         */
@@ -18674,31 +16317,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ICapabilitiesNet}
         */
         ICapabilitiesNet.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "GSM":
-                        return ICapabilitiesNet.GSM;
-                    case "GPRS":
-                        return ICapabilitiesNet.GPRS;
-                    case "HSDPA":
-                        return ICapabilitiesNet.HSDPA;
-                    case "LTE":
-                        return ICapabilitiesNet.LTE;
-                    case "WIFI":
-                        return ICapabilitiesNet.WIFI;
-                    case "Ethernet":
-                        return ICapabilitiesNet.Ethernet;
-                    case "Unavailable":
-                        return ICapabilitiesNet.Unavailable;
-                    case "Unknown":
-                        return ICapabilitiesNet.Unknown;
-                    default:
-                        return ICapabilitiesNet.Unknown;
-                }
+            var retValue = ICapabilitiesNet.Unknown;
+            if (object != null && object.value != null && ICapabilitiesNet.hasOwnProperty(object.value)) {
+                retValue = ICapabilitiesNet[object.value];
             }
-            else {
-                return ICapabilitiesNet.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ICapabilitiesNet} [GSM='GSM']
@@ -18753,25 +16376,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ICapabilitiesNotification}
         */
         ICapabilitiesNotification.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Alarm":
-                        return ICapabilitiesNotification.Alarm;
-                    case "LocalNotification":
-                        return ICapabilitiesNotification.LocalNotification;
-                    case "RemoteNotification":
-                        return ICapabilitiesNotification.RemoteNotification;
-                    case "Vibration":
-                        return ICapabilitiesNotification.Vibration;
-                    case "Unknown":
-                        return ICapabilitiesNotification.Unknown;
-                    default:
-                        return ICapabilitiesNotification.Unknown;
-                }
+            var retValue = ICapabilitiesNotification.Unknown;
+            if (object != null && object.value != null && ICapabilitiesNotification.hasOwnProperty(object.value)) {
+                retValue = ICapabilitiesNotification[object.value];
             }
-            else {
-                return ICapabilitiesNotification.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ICapabilitiesNotification} [Alarm='Alarm']
@@ -18814,42 +16423,28 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ICapabilitiesOrientation}
         */
         ICapabilitiesOrientation.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Portrait_Up":
-                        return ICapabilitiesOrientation.Portrait_Up;
-                    case "Portrait_Down":
-                        return ICapabilitiesOrientation.Portrait_Down;
-                    case "Landscape_Left":
-                        return ICapabilitiesOrientation.Landscape_Left;
-                    case "Landscape_Right":
-                        return ICapabilitiesOrientation.Landscape_Right;
-                    case "Unknown":
-                        return ICapabilitiesOrientation.Unknown;
-                    default:
-                        return ICapabilitiesOrientation.Unknown;
-                }
+            var retValue = ICapabilitiesOrientation.Unknown;
+            if (object != null && object.value != null && ICapabilitiesOrientation.hasOwnProperty(object.value)) {
+                retValue = ICapabilitiesOrientation[object.value];
             }
-            else {
-                return ICapabilitiesOrientation.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.ICapabilitiesOrientation} [Portrait_Up='Portrait_Up']
+           @property {Adaptive.ICapabilitiesOrientation} [PortraitUp='PortraitUp']
         */
-        ICapabilitiesOrientation.Portrait_Up = new ICapabilitiesOrientation("Portrait_Up");
+        ICapabilitiesOrientation.PortraitUp = new ICapabilitiesOrientation("PortraitUp");
         /**
-           @property {Adaptive.ICapabilitiesOrientation} [Portrait_Down='Portrait_Down']
+           @property {Adaptive.ICapabilitiesOrientation} [PortraitDown='PortraitDown']
         */
-        ICapabilitiesOrientation.Portrait_Down = new ICapabilitiesOrientation("Portrait_Down");
+        ICapabilitiesOrientation.PortraitDown = new ICapabilitiesOrientation("PortraitDown");
         /**
-           @property {Adaptive.ICapabilitiesOrientation} [Landscape_Left='Landscape_Left']
+           @property {Adaptive.ICapabilitiesOrientation} [LandscapeLeft='LandscapeLeft']
         */
-        ICapabilitiesOrientation.Landscape_Left = new ICapabilitiesOrientation("Landscape_Left");
+        ICapabilitiesOrientation.LandscapeLeft = new ICapabilitiesOrientation("LandscapeLeft");
         /**
-           @property {Adaptive.ICapabilitiesOrientation} [Landscape_Right='Landscape_Right']
+           @property {Adaptive.ICapabilitiesOrientation} [LandscapeRight='LandscapeRight']
         */
-        ICapabilitiesOrientation.Landscape_Right = new ICapabilitiesOrientation("Landscape_Right");
+        ICapabilitiesOrientation.LandscapeRight = new ICapabilitiesOrientation("LandscapeRight");
         /**
            @property {Adaptive.ICapabilitiesOrientation} [Unknown='Unknown']
         */
@@ -18875,31 +16470,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ICapabilitiesSensor}
         */
         ICapabilitiesSensor.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Accelerometer":
-                        return ICapabilitiesSensor.Accelerometer;
-                    case "AmbientLight":
-                        return ICapabilitiesSensor.AmbientLight;
-                    case "Barometer":
-                        return ICapabilitiesSensor.Barometer;
-                    case "Geolocation":
-                        return ICapabilitiesSensor.Geolocation;
-                    case "Gyroscope":
-                        return ICapabilitiesSensor.Gyroscope;
-                    case "Magnetometer":
-                        return ICapabilitiesSensor.Magnetometer;
-                    case "Proximity":
-                        return ICapabilitiesSensor.Proximity;
-                    case "Unknown":
-                        return ICapabilitiesSensor.Unknown;
-                    default:
-                        return ICapabilitiesSensor.Unknown;
-                }
+            var retValue = ICapabilitiesSensor.Unknown;
+            if (object != null && object.value != null && ICapabilitiesSensor.hasOwnProperty(object.value)) {
+                retValue = ICapabilitiesSensor[object.value];
             }
-            else {
-                return ICapabilitiesSensor.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ICapabilitiesSensor} [Accelerometer='Accelerometer']
@@ -18954,66 +16529,44 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IContactFieldGroup}
         */
         IContactFieldGroup.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "PERSONAL_INFO":
-                        return IContactFieldGroup.PERSONAL_INFO;
-                    case "PROFESSIONAL_INFO":
-                        return IContactFieldGroup.PROFESSIONAL_INFO;
-                    case "ADDRESSES":
-                        return IContactFieldGroup.ADDRESSES;
-                    case "PHONES":
-                        return IContactFieldGroup.PHONES;
-                    case "EMAILS":
-                        return IContactFieldGroup.EMAILS;
-                    case "WEBSITES":
-                        return IContactFieldGroup.WEBSITES;
-                    case "SOCIALS":
-                        return IContactFieldGroup.SOCIALS;
-                    case "TAGS":
-                        return IContactFieldGroup.TAGS;
-                    case "Unknown":
-                        return IContactFieldGroup.Unknown;
-                    default:
-                        return IContactFieldGroup.Unknown;
-                }
+            var retValue = IContactFieldGroup.Unknown;
+            if (object != null && object.value != null && IContactFieldGroup.hasOwnProperty(object.value)) {
+                retValue = IContactFieldGroup[object.value];
             }
-            else {
-                return IContactFieldGroup.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.IContactFieldGroup} [PERSONAL_INFO='PERSONAL_INFO']
+           @property {Adaptive.IContactFieldGroup} [PersonalInfo='PersonalInfo']
         */
-        IContactFieldGroup.PERSONAL_INFO = new IContactFieldGroup("PERSONAL_INFO");
+        IContactFieldGroup.PersonalInfo = new IContactFieldGroup("PersonalInfo");
         /**
-           @property {Adaptive.IContactFieldGroup} [PROFESSIONAL_INFO='PROFESSIONAL_INFO']
+           @property {Adaptive.IContactFieldGroup} [ProfessionalInfo='ProfessionalInfo']
         */
-        IContactFieldGroup.PROFESSIONAL_INFO = new IContactFieldGroup("PROFESSIONAL_INFO");
+        IContactFieldGroup.ProfessionalInfo = new IContactFieldGroup("ProfessionalInfo");
         /**
-           @property {Adaptive.IContactFieldGroup} [ADDRESSES='ADDRESSES']
+           @property {Adaptive.IContactFieldGroup} [Addresses='Addresses']
         */
-        IContactFieldGroup.ADDRESSES = new IContactFieldGroup("ADDRESSES");
+        IContactFieldGroup.Addresses = new IContactFieldGroup("Addresses");
         /**
-           @property {Adaptive.IContactFieldGroup} [PHONES='PHONES']
+           @property {Adaptive.IContactFieldGroup} [Phones='Phones']
         */
-        IContactFieldGroup.PHONES = new IContactFieldGroup("PHONES");
+        IContactFieldGroup.Phones = new IContactFieldGroup("Phones");
         /**
-           @property {Adaptive.IContactFieldGroup} [EMAILS='EMAILS']
+           @property {Adaptive.IContactFieldGroup} [Emails='Emails']
         */
-        IContactFieldGroup.EMAILS = new IContactFieldGroup("EMAILS");
+        IContactFieldGroup.Emails = new IContactFieldGroup("Emails");
         /**
-           @property {Adaptive.IContactFieldGroup} [WEBSITES='WEBSITES']
+           @property {Adaptive.IContactFieldGroup} [Websites='Websites']
         */
-        IContactFieldGroup.WEBSITES = new IContactFieldGroup("WEBSITES");
+        IContactFieldGroup.Websites = new IContactFieldGroup("Websites");
         /**
-           @property {Adaptive.IContactFieldGroup} [SOCIALS='SOCIALS']
+           @property {Adaptive.IContactFieldGroup} [Socials='Socials']
         */
-        IContactFieldGroup.SOCIALS = new IContactFieldGroup("SOCIALS");
+        IContactFieldGroup.Socials = new IContactFieldGroup("Socials");
         /**
-           @property {Adaptive.IContactFieldGroup} [TAGS='TAGS']
+           @property {Adaptive.IContactFieldGroup} [Tags='Tags']
         */
-        IContactFieldGroup.TAGS = new IContactFieldGroup("TAGS");
+        IContactFieldGroup.Tags = new IContactFieldGroup("Tags");
         /**
            @property {Adaptive.IContactFieldGroup} [Unknown='Unknown']
         */
@@ -19039,36 +16592,24 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IContactFilter}
         */
         IContactFilter.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "HAS_PHONE":
-                        return IContactFilter.HAS_PHONE;
-                    case "HAS_EMAIL":
-                        return IContactFilter.HAS_EMAIL;
-                    case "HAS_ADDRESS":
-                        return IContactFilter.HAS_ADDRESS;
-                    case "Unknown":
-                        return IContactFilter.Unknown;
-                    default:
-                        return IContactFilter.Unknown;
-                }
+            var retValue = IContactFilter.Unknown;
+            if (object != null && object.value != null && IContactFilter.hasOwnProperty(object.value)) {
+                retValue = IContactFilter[object.value];
             }
-            else {
-                return IContactFilter.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.IContactFilter} [HAS_PHONE='HAS_PHONE']
+           @property {Adaptive.IContactFilter} [HasPhone='HasPhone']
         */
-        IContactFilter.HAS_PHONE = new IContactFilter("HAS_PHONE");
+        IContactFilter.HasPhone = new IContactFilter("HasPhone");
         /**
-           @property {Adaptive.IContactFilter} [HAS_EMAIL='HAS_EMAIL']
+           @property {Adaptive.IContactFilter} [HasEmail='HasEmail']
         */
-        IContactFilter.HAS_EMAIL = new IContactFilter("HAS_EMAIL");
+        IContactFilter.HasEmail = new IContactFilter("HasEmail");
         /**
-           @property {Adaptive.IContactFilter} [HAS_ADDRESS='HAS_ADDRESS']
+           @property {Adaptive.IContactFilter} [HasAddress='HasAddress']
         */
-        IContactFilter.HAS_ADDRESS = new IContactFilter("HAS_ADDRESS");
+        IContactFilter.HasAddress = new IContactFilter("HasAddress");
         /**
            @property {Adaptive.IContactFilter} [Unknown='Unknown']
         */
@@ -19094,36 +16635,24 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IContactPhotoResultCallbackError}
         */
         IContactPhotoResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "NoPermission":
-                        return IContactPhotoResultCallbackError.NoPermission;
-                    case "Wrong_Params":
-                        return IContactPhotoResultCallbackError.Wrong_Params;
-                    case "No_Photo":
-                        return IContactPhotoResultCallbackError.No_Photo;
-                    case "Unknown":
-                        return IContactPhotoResultCallbackError.Unknown;
-                    default:
-                        return IContactPhotoResultCallbackError.Unknown;
-                }
+            var retValue = IContactPhotoResultCallbackError.Unknown;
+            if (object != null && object.value != null && IContactPhotoResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IContactPhotoResultCallbackError[object.value];
             }
-            else {
-                return IContactPhotoResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IContactPhotoResultCallbackError} [NoPermission='NoPermission']
         */
         IContactPhotoResultCallbackError.NoPermission = new IContactPhotoResultCallbackError("NoPermission");
         /**
-           @property {Adaptive.IContactPhotoResultCallbackError} [Wrong_Params='Wrong_Params']
+           @property {Adaptive.IContactPhotoResultCallbackError} [WrongParams='WrongParams']
         */
-        IContactPhotoResultCallbackError.Wrong_Params = new IContactPhotoResultCallbackError("Wrong_Params");
+        IContactPhotoResultCallbackError.WrongParams = new IContactPhotoResultCallbackError("WrongParams");
         /**
-           @property {Adaptive.IContactPhotoResultCallbackError} [No_Photo='No_Photo']
+           @property {Adaptive.IContactPhotoResultCallbackError} [NoPhoto='NoPhoto']
         */
-        IContactPhotoResultCallbackError.No_Photo = new IContactPhotoResultCallbackError("No_Photo");
+        IContactPhotoResultCallbackError.NoPhoto = new IContactPhotoResultCallbackError("NoPhoto");
         /**
            @property {Adaptive.IContactPhotoResultCallbackError} [Unknown='Unknown']
         */
@@ -19149,30 +16678,20 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IContactPhotoResultCallbackWarning}
         */
         IContactPhotoResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "LimitExceeded":
-                        return IContactPhotoResultCallbackWarning.LimitExceeded;
-                    case "No_Matches":
-                        return IContactPhotoResultCallbackWarning.No_Matches;
-                    case "Unknown":
-                        return IContactPhotoResultCallbackWarning.Unknown;
-                    default:
-                        return IContactPhotoResultCallbackWarning.Unknown;
-                }
+            var retValue = IContactPhotoResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IContactPhotoResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IContactPhotoResultCallbackWarning[object.value];
             }
-            else {
-                return IContactPhotoResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IContactPhotoResultCallbackWarning} [LimitExceeded='LimitExceeded']
         */
         IContactPhotoResultCallbackWarning.LimitExceeded = new IContactPhotoResultCallbackWarning("LimitExceeded");
         /**
-           @property {Adaptive.IContactPhotoResultCallbackWarning} [No_Matches='No_Matches']
+           @property {Adaptive.IContactPhotoResultCallbackWarning} [NoMatches='NoMatches']
         */
-        IContactPhotoResultCallbackWarning.No_Matches = new IContactPhotoResultCallbackWarning("No_Matches");
+        IContactPhotoResultCallbackWarning.NoMatches = new IContactPhotoResultCallbackWarning("NoMatches");
         /**
            @property {Adaptive.IContactPhotoResultCallbackWarning} [Unknown='Unknown']
         */
@@ -19198,30 +16717,20 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IContactResultCallbackError}
         */
         IContactResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "NoPermission":
-                        return IContactResultCallbackError.NoPermission;
-                    case "Wrong_Params":
-                        return IContactResultCallbackError.Wrong_Params;
-                    case "Unknown":
-                        return IContactResultCallbackError.Unknown;
-                    default:
-                        return IContactResultCallbackError.Unknown;
-                }
+            var retValue = IContactResultCallbackError.Unknown;
+            if (object != null && object.value != null && IContactResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IContactResultCallbackError[object.value];
             }
-            else {
-                return IContactResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IContactResultCallbackError} [NoPermission='NoPermission']
         */
         IContactResultCallbackError.NoPermission = new IContactResultCallbackError("NoPermission");
         /**
-           @property {Adaptive.IContactResultCallbackError} [Wrong_Params='Wrong_Params']
+           @property {Adaptive.IContactResultCallbackError} [WrongParams='WrongParams']
         */
-        IContactResultCallbackError.Wrong_Params = new IContactResultCallbackError("Wrong_Params");
+        IContactResultCallbackError.WrongParams = new IContactResultCallbackError("WrongParams");
         /**
            @property {Adaptive.IContactResultCallbackError} [Unknown='Unknown']
         */
@@ -19247,30 +16756,20 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IContactResultCallbackWarning}
         */
         IContactResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "LimitExceeded":
-                        return IContactResultCallbackWarning.LimitExceeded;
-                    case "No_Matches":
-                        return IContactResultCallbackWarning.No_Matches;
-                    case "Unknown":
-                        return IContactResultCallbackWarning.Unknown;
-                    default:
-                        return IContactResultCallbackWarning.Unknown;
-                }
+            var retValue = IContactResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IContactResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IContactResultCallbackWarning[object.value];
             }
-            else {
-                return IContactResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IContactResultCallbackWarning} [LimitExceeded='LimitExceeded']
         */
         IContactResultCallbackWarning.LimitExceeded = new IContactResultCallbackWarning("LimitExceeded");
         /**
-           @property {Adaptive.IContactResultCallbackWarning} [No_Matches='No_Matches']
+           @property {Adaptive.IContactResultCallbackWarning} [NoMatches='NoMatches']
         */
-        IContactResultCallbackWarning.No_Matches = new IContactResultCallbackWarning("No_Matches");
+        IContactResultCallbackWarning.NoMatches = new IContactResultCallbackWarning("NoMatches");
         /**
            @property {Adaptive.IContactResultCallbackWarning} [Unknown='Unknown']
         */
@@ -19296,23 +16795,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IDatabaseResultCallbackError}
         */
         IDatabaseResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "NoSpace":
-                        return IDatabaseResultCallbackError.NoSpace;
-                    case "SqlException":
-                        return IDatabaseResultCallbackError.SqlException;
-                    case "NotDeleted":
-                        return IDatabaseResultCallbackError.NotDeleted;
-                    case "Unknown":
-                        return IDatabaseResultCallbackError.Unknown;
-                    default:
-                        return IDatabaseResultCallbackError.Unknown;
-                }
+            var retValue = IDatabaseResultCallbackError.Unknown;
+            if (object != null && object.value != null && IDatabaseResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IDatabaseResultCallbackError[object.value];
             }
-            else {
-                return IDatabaseResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IDatabaseResultCallbackError} [NoSpace='NoSpace']
@@ -19351,21 +16838,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IDatabaseResultCallbackWarning}
         */
         IDatabaseResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "DatabaseExists":
-                        return IDatabaseResultCallbackWarning.DatabaseExists;
-                    case "IsOpen":
-                        return IDatabaseResultCallbackWarning.IsOpen;
-                    case "Unknown":
-                        return IDatabaseResultCallbackWarning.Unknown;
-                    default:
-                        return IDatabaseResultCallbackWarning.Unknown;
-                }
+            var retValue = IDatabaseResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IDatabaseResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IDatabaseResultCallbackWarning[object.value];
             }
-            else {
-                return IDatabaseResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IDatabaseResultCallbackWarning} [DatabaseExists='DatabaseExists']
@@ -19400,27 +16877,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IDatabaseTableResultCallbackError}
         */
         IDatabaseTableResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "NoSpace":
-                        return IDatabaseTableResultCallbackError.NoSpace;
-                    case "ReadOnlyTable":
-                        return IDatabaseTableResultCallbackError.ReadOnlyTable;
-                    case "SqlException":
-                        return IDatabaseTableResultCallbackError.SqlException;
-                    case "DatabaseNotFound":
-                        return IDatabaseTableResultCallbackError.DatabaseNotFound;
-                    case "NoTableFound":
-                        return IDatabaseTableResultCallbackError.NoTableFound;
-                    case "Unknown":
-                        return IDatabaseTableResultCallbackError.Unknown;
-                    default:
-                        return IDatabaseTableResultCallbackError.Unknown;
-                }
+            var retValue = IDatabaseTableResultCallbackError.Unknown;
+            if (object != null && object.value != null && IDatabaseTableResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IDatabaseTableResultCallbackError[object.value];
             }
-            else {
-                return IDatabaseTableResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IDatabaseTableResultCallbackError} [NoSpace='NoSpace']
@@ -19467,23 +16928,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IDatabaseTableResultCallbackWarning}
         */
         IDatabaseTableResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "TableExists":
-                        return IDatabaseTableResultCallbackWarning.TableExists;
-                    case "TableLocked":
-                        return IDatabaseTableResultCallbackWarning.TableLocked;
-                    case "NoResults":
-                        return IDatabaseTableResultCallbackWarning.NoResults;
-                    case "Unknown":
-                        return IDatabaseTableResultCallbackWarning.Unknown;
-                    default:
-                        return IDatabaseTableResultCallbackWarning.Unknown;
-                }
+            var retValue = IDatabaseTableResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IDatabaseTableResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IDatabaseTableResultCallbackWarning[object.value];
             }
-            else {
-                return IDatabaseTableResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IDatabaseTableResultCallbackWarning} [TableExists='TableExists']
@@ -19522,17 +16971,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IDeviceOrientationListenerError}
         */
         IDeviceOrientationListenerError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Unknown":
-                        return IDeviceOrientationListenerError.Unknown;
-                    default:
-                        return IDeviceOrientationListenerError.Unknown;
-                }
+            var retValue = IDeviceOrientationListenerError.Unknown;
+            if (object != null && object.value != null && IDeviceOrientationListenerError.hasOwnProperty(object.value)) {
+                retValue = IDeviceOrientationListenerError[object.value];
             }
-            else {
-                return IDeviceOrientationListenerError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IDeviceOrientationListenerError} [Unknown='Unknown']
@@ -19559,17 +17002,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IDeviceOrientationListenerWarning}
         */
         IDeviceOrientationListenerWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Unknown":
-                        return IDeviceOrientationListenerWarning.Unknown;
-                    default:
-                        return IDeviceOrientationListenerWarning.Unknown;
-                }
+            var retValue = IDeviceOrientationListenerWarning.Unknown;
+            if (object != null && object.value != null && IDeviceOrientationListenerWarning.hasOwnProperty(object.value)) {
+                retValue = IDeviceOrientationListenerWarning[object.value];
             }
-            else {
-                return IDeviceOrientationListenerWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IDeviceOrientationListenerWarning} [Unknown='Unknown']
@@ -19596,17 +17033,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IDisplayOrientationListenerError}
         */
         IDisplayOrientationListenerError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Unknown":
-                        return IDisplayOrientationListenerError.Unknown;
-                    default:
-                        return IDisplayOrientationListenerError.Unknown;
-                }
+            var retValue = IDisplayOrientationListenerError.Unknown;
+            if (object != null && object.value != null && IDisplayOrientationListenerError.hasOwnProperty(object.value)) {
+                retValue = IDisplayOrientationListenerError[object.value];
             }
-            else {
-                return IDisplayOrientationListenerError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IDisplayOrientationListenerError} [Unknown='Unknown']
@@ -19633,24 +17064,16 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IDisplayOrientationListenerWarning}
         */
         IDisplayOrientationListenerWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Application_Vetoed":
-                        return IDisplayOrientationListenerWarning.Application_Vetoed;
-                    case "Unknown":
-                        return IDisplayOrientationListenerWarning.Unknown;
-                    default:
-                        return IDisplayOrientationListenerWarning.Unknown;
-                }
+            var retValue = IDisplayOrientationListenerWarning.Unknown;
+            if (object != null && object.value != null && IDisplayOrientationListenerWarning.hasOwnProperty(object.value)) {
+                retValue = IDisplayOrientationListenerWarning[object.value];
             }
-            else {
-                return IDisplayOrientationListenerWarning.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.IDisplayOrientationListenerWarning} [Application_Vetoed='Application_Vetoed']
+           @property {Adaptive.IDisplayOrientationListenerWarning} [ApplicationVetoed='ApplicationVetoed']
         */
-        IDisplayOrientationListenerWarning.Application_Vetoed = new IDisplayOrientationListenerWarning("Application_Vetoed");
+        IDisplayOrientationListenerWarning.ApplicationVetoed = new IDisplayOrientationListenerWarning("ApplicationVetoed");
         /**
            @property {Adaptive.IDisplayOrientationListenerWarning} [Unknown='Unknown']
         */
@@ -19676,23 +17099,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileDataLoadResultCallbackError}
         */
         IFileDataLoadResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "InexistentFile":
-                        return IFileDataLoadResultCallbackError.InexistentFile;
-                    case "InsufficientSpace":
-                        return IFileDataLoadResultCallbackError.InsufficientSpace;
-                    case "Unauthorized":
-                        return IFileDataLoadResultCallbackError.Unauthorized;
-                    case "Unknown":
-                        return IFileDataLoadResultCallbackError.Unknown;
-                    default:
-                        return IFileDataLoadResultCallbackError.Unknown;
-                }
+            var retValue = IFileDataLoadResultCallbackError.Unknown;
+            if (object != null && object.value != null && IFileDataLoadResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IFileDataLoadResultCallbackError[object.value];
             }
-            else {
-                return IFileDataLoadResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileDataLoadResultCallbackError} [InexistentFile='InexistentFile']
@@ -19731,19 +17142,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileDataLoadResultCallbackWarning}
         */
         IFileDataLoadResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "ExceedMaximumSize":
-                        return IFileDataLoadResultCallbackWarning.ExceedMaximumSize;
-                    case "Unknown":
-                        return IFileDataLoadResultCallbackWarning.Unknown;
-                    default:
-                        return IFileDataLoadResultCallbackWarning.Unknown;
-                }
+            var retValue = IFileDataLoadResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IFileDataLoadResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IFileDataLoadResultCallbackWarning[object.value];
             }
-            else {
-                return IFileDataLoadResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileDataLoadResultCallbackWarning} [ExceedMaximumSize='ExceedMaximumSize']
@@ -19774,23 +17177,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileDataStoreResultCallbackError}
         */
         IFileDataStoreResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "InexistentFile":
-                        return IFileDataStoreResultCallbackError.InexistentFile;
-                    case "InsufficientSpace":
-                        return IFileDataStoreResultCallbackError.InsufficientSpace;
-                    case "Unauthorized":
-                        return IFileDataStoreResultCallbackError.Unauthorized;
-                    case "Unknown":
-                        return IFileDataStoreResultCallbackError.Unknown;
-                    default:
-                        return IFileDataStoreResultCallbackError.Unknown;
-                }
+            var retValue = IFileDataStoreResultCallbackError.Unknown;
+            if (object != null && object.value != null && IFileDataStoreResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IFileDataStoreResultCallbackError[object.value];
             }
-            else {
-                return IFileDataStoreResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileDataStoreResultCallbackError} [InexistentFile='InexistentFile']
@@ -19829,19 +17220,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileDataStoreResultCallbackWarning}
         */
         IFileDataStoreResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "ExceedMaximumSize":
-                        return IFileDataStoreResultCallbackWarning.ExceedMaximumSize;
-                    case "Unknown":
-                        return IFileDataStoreResultCallbackWarning.Unknown;
-                    default:
-                        return IFileDataStoreResultCallbackWarning.Unknown;
-                }
+            var retValue = IFileDataStoreResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IFileDataStoreResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IFileDataStoreResultCallbackWarning[object.value];
             }
-            else {
-                return IFileDataStoreResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileDataStoreResultCallbackWarning} [ExceedMaximumSize='ExceedMaximumSize']
@@ -19872,21 +17255,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileListResultCallbackError}
         */
         IFileListResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "InexistentFile":
-                        return IFileListResultCallbackError.InexistentFile;
-                    case "Unauthorized":
-                        return IFileListResultCallbackError.Unauthorized;
-                    case "Unknown":
-                        return IFileListResultCallbackError.Unknown;
-                    default:
-                        return IFileListResultCallbackError.Unknown;
-                }
+            var retValue = IFileListResultCallbackError.Unknown;
+            if (object != null && object.value != null && IFileListResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IFileListResultCallbackError[object.value];
             }
-            else {
-                return IFileListResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileListResultCallbackError} [InexistentFile='InexistentFile']
@@ -19921,19 +17294,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileListResultCallbackWarning}
         */
         IFileListResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "PartialResult":
-                        return IFileListResultCallbackWarning.PartialResult;
-                    case "Unknown":
-                        return IFileListResultCallbackWarning.Unknown;
-                    default:
-                        return IFileListResultCallbackWarning.Unknown;
-                }
+            var retValue = IFileListResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IFileListResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IFileListResultCallbackWarning[object.value];
             }
-            else {
-                return IFileListResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileListResultCallbackWarning} [PartialResult='PartialResult']
@@ -19964,27 +17329,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileResultCallbackError}
         */
         IFileResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "FileExists":
-                        return IFileResultCallbackError.FileExists;
-                    case "SourceInexistent":
-                        return IFileResultCallbackError.SourceInexistent;
-                    case "DestionationExists":
-                        return IFileResultCallbackError.DestionationExists;
-                    case "InsufficientSpace":
-                        return IFileResultCallbackError.InsufficientSpace;
-                    case "Unauthorized":
-                        return IFileResultCallbackError.Unauthorized;
-                    case "Unknown":
-                        return IFileResultCallbackError.Unknown;
-                    default:
-                        return IFileResultCallbackError.Unknown;
-                }
+            var retValue = IFileResultCallbackError.Unknown;
+            if (object != null && object.value != null && IFileResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IFileResultCallbackError[object.value];
             }
-            else {
-                return IFileResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileResultCallbackError} [FileExists='FileExists']
@@ -20031,21 +17380,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileResultCallbackWarning}
         */
         IFileResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "SourceNotDeleted":
-                        return IFileResultCallbackWarning.SourceNotDeleted;
-                    case "RootDirectory":
-                        return IFileResultCallbackWarning.RootDirectory;
-                    case "Unknown":
-                        return IFileResultCallbackWarning.Unknown;
-                    default:
-                        return IFileResultCallbackWarning.Unknown;
-                }
+            var retValue = IFileResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IFileResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IFileResultCallbackWarning[object.value];
             }
-            else {
-                return IFileResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileResultCallbackWarning} [SourceNotDeleted='SourceNotDeleted']
@@ -20080,23 +17419,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileSystemSecurity}
         */
         IFileSystemSecurity.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Default":
-                        return IFileSystemSecurity.Default;
-                    case "Protected":
-                        return IFileSystemSecurity.Protected;
-                    case "Encrypted":
-                        return IFileSystemSecurity.Encrypted;
-                    case "Unknown":
-                        return IFileSystemSecurity.Unknown;
-                    default:
-                        return IFileSystemSecurity.Unknown;
-                }
+            var retValue = IFileSystemSecurity.Unknown;
+            if (object != null && object.value != null && IFileSystemSecurity.hasOwnProperty(object.value)) {
+                retValue = IFileSystemSecurity[object.value];
             }
-            else {
-                return IFileSystemSecurity.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileSystemSecurity} [Default='Default']
@@ -20135,29 +17462,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileSystemStorageType}
         */
         IFileSystemStorageType.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Application":
-                        return IFileSystemStorageType.Application;
-                    case "Document":
-                        return IFileSystemStorageType.Document;
-                    case "Cloud":
-                        return IFileSystemStorageType.Cloud;
-                    case "Protected":
-                        return IFileSystemStorageType.Protected;
-                    case "Cache":
-                        return IFileSystemStorageType.Cache;
-                    case "External":
-                        return IFileSystemStorageType.External;
-                    case "Unknown":
-                        return IFileSystemStorageType.Unknown;
-                    default:
-                        return IFileSystemStorageType.Unknown;
-                }
+            var retValue = IFileSystemStorageType.Unknown;
+            if (object != null && object.value != null && IFileSystemStorageType.hasOwnProperty(object.value)) {
+                retValue = IFileSystemStorageType[object.value];
             }
-            else {
-                return IFileSystemStorageType.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileSystemStorageType} [Application='Application']
@@ -20208,21 +17517,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IFileSystemType}
         */
         IFileSystemType.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Directory":
-                        return IFileSystemType.Directory;
-                    case "File":
-                        return IFileSystemType.File;
-                    case "Unknown":
-                        return IFileSystemType.Unknown;
-                    default:
-                        return IFileSystemType.Unknown;
-                }
+            var retValue = IFileSystemType.Unknown;
+            if (object != null && object.value != null && IFileSystemType.hasOwnProperty(object.value)) {
+                retValue = IFileSystemType[object.value];
             }
-            else {
-                return IFileSystemType.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IFileSystemType} [Directory='Directory']
@@ -20257,25 +17556,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IGeolocationListenerError}
         */
         IGeolocationListenerError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Disabled":
-                        return IGeolocationListenerError.Disabled;
-                    case "RestrictedAccess":
-                        return IGeolocationListenerError.RestrictedAccess;
-                    case "DeniedAccess":
-                        return IGeolocationListenerError.DeniedAccess;
-                    case "StatusNotDetermined":
-                        return IGeolocationListenerError.StatusNotDetermined;
-                    case "Unknown":
-                        return IGeolocationListenerError.Unknown;
-                    default:
-                        return IGeolocationListenerError.Unknown;
-                }
+            var retValue = IGeolocationListenerError.Unknown;
+            if (object != null && object.value != null && IGeolocationListenerError.hasOwnProperty(object.value)) {
+                retValue = IGeolocationListenerError[object.value];
             }
-            else {
-                return IGeolocationListenerError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IGeolocationListenerError} [Disabled='Disabled']
@@ -20318,21 +17603,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IGeolocationListenerWarning}
         */
         IGeolocationListenerWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "HighDoP":
-                        return IGeolocationListenerWarning.HighDoP;
-                    case "StaleData":
-                        return IGeolocationListenerWarning.StaleData;
-                    case "Unknown":
-                        return IGeolocationListenerWarning.Unknown;
-                    default:
-                        return IGeolocationListenerWarning.Unknown;
-                }
+            var retValue = IGeolocationListenerWarning.Unknown;
+            if (object != null && object.value != null && IGeolocationListenerWarning.hasOwnProperty(object.value)) {
+                retValue = IGeolocationListenerWarning[object.value];
             }
-            else {
-                return IGeolocationListenerWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IGeolocationListenerWarning} [HighDoP='HighDoP']
@@ -20367,23 +17642,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ILifecycleListenerError}
         */
         ILifecycleListenerError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Runtime":
-                        return ILifecycleListenerError.Runtime;
-                    case "Implementation":
-                        return ILifecycleListenerError.Implementation;
-                    case "Killed":
-                        return ILifecycleListenerError.Killed;
-                    case "Unknown":
-                        return ILifecycleListenerError.Unknown;
-                    default:
-                        return ILifecycleListenerError.Unknown;
-                }
+            var retValue = ILifecycleListenerError.Unknown;
+            if (object != null && object.value != null && ILifecycleListenerError.hasOwnProperty(object.value)) {
+                retValue = ILifecycleListenerError[object.value];
             }
-            else {
-                return ILifecycleListenerError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ILifecycleListenerError} [Runtime='Runtime']
@@ -20422,21 +17685,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ILifecycleListenerWarning}
         */
         ILifecycleListenerWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "MemoryLow":
-                        return ILifecycleListenerWarning.MemoryLow;
-                    case "BatteryLow":
-                        return ILifecycleListenerWarning.BatteryLow;
-                    case "Unknown":
-                        return ILifecycleListenerWarning.Unknown;
-                    default:
-                        return ILifecycleListenerWarning.Unknown;
-                }
+            var retValue = ILifecycleListenerWarning.Unknown;
+            if (object != null && object.value != null && ILifecycleListenerWarning.hasOwnProperty(object.value)) {
+                retValue = ILifecycleListenerWarning[object.value];
             }
-            else {
-                return ILifecycleListenerWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ILifecycleListenerWarning} [MemoryLow='MemoryLow']
@@ -20471,42 +17724,28 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ILoggingLogLevel}
         */
         ILoggingLogLevel.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "DEBUG":
-                        return ILoggingLogLevel.DEBUG;
-                    case "WARN":
-                        return ILoggingLogLevel.WARN;
-                    case "ERROR":
-                        return ILoggingLogLevel.ERROR;
-                    case "INFO":
-                        return ILoggingLogLevel.INFO;
-                    case "Unknown":
-                        return ILoggingLogLevel.Unknown;
-                    default:
-                        return ILoggingLogLevel.Unknown;
-                }
+            var retValue = ILoggingLogLevel.Unknown;
+            if (object != null && object.value != null && ILoggingLogLevel.hasOwnProperty(object.value)) {
+                retValue = ILoggingLogLevel[object.value];
             }
-            else {
-                return ILoggingLogLevel.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.ILoggingLogLevel} [DEBUG='DEBUG']
+           @property {Adaptive.ILoggingLogLevel} [Debug='Debug']
         */
-        ILoggingLogLevel.DEBUG = new ILoggingLogLevel("DEBUG");
+        ILoggingLogLevel.Debug = new ILoggingLogLevel("Debug");
         /**
-           @property {Adaptive.ILoggingLogLevel} [WARN='WARN']
+           @property {Adaptive.ILoggingLogLevel} [Warn='Warn']
         */
-        ILoggingLogLevel.WARN = new ILoggingLogLevel("WARN");
+        ILoggingLogLevel.Warn = new ILoggingLogLevel("Warn");
         /**
-           @property {Adaptive.ILoggingLogLevel} [ERROR='ERROR']
+           @property {Adaptive.ILoggingLogLevel} [Error='Error']
         */
-        ILoggingLogLevel.ERROR = new ILoggingLogLevel("ERROR");
+        ILoggingLogLevel.Error = new ILoggingLogLevel("Error");
         /**
-           @property {Adaptive.ILoggingLogLevel} [INFO='INFO']
+           @property {Adaptive.ILoggingLogLevel} [Info='Info']
         */
-        ILoggingLogLevel.INFO = new ILoggingLogLevel("INFO");
+        ILoggingLogLevel.Info = new ILoggingLogLevel("Info");
         /**
            @property {Adaptive.ILoggingLogLevel} [Unknown='Unknown']
         */
@@ -20532,27 +17771,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IMessagingCallbackError}
         */
         IMessagingCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "SIMNotPresent":
-                        return IMessagingCallbackError.SIMNotPresent;
-                    case "EmailAccountNotFound":
-                        return IMessagingCallbackError.EmailAccountNotFound;
-                    case "NotSent":
-                        return IMessagingCallbackError.NotSent;
-                    case "WrongParams":
-                        return IMessagingCallbackError.WrongParams;
-                    case "NotSupported":
-                        return IMessagingCallbackError.NotSupported;
-                    case "Unknown":
-                        return IMessagingCallbackError.Unknown;
-                    default:
-                        return IMessagingCallbackError.Unknown;
-                }
+            var retValue = IMessagingCallbackError.Unknown;
+            if (object != null && object.value != null && IMessagingCallbackError.hasOwnProperty(object.value)) {
+                retValue = IMessagingCallbackError[object.value];
             }
-            else {
-                return IMessagingCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IMessagingCallbackError} [SIMNotPresent='SIMNotPresent']
@@ -20599,21 +17822,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IMessagingCallbackWarning}
         */
         IMessagingCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "UnableToSentAll":
-                        return IMessagingCallbackWarning.UnableToSentAll;
-                    case "UnableToFetchAttachment":
-                        return IMessagingCallbackWarning.UnableToFetchAttachment;
-                    case "Unknown":
-                        return IMessagingCallbackWarning.Unknown;
-                    default:
-                        return IMessagingCallbackWarning.Unknown;
-                }
+            var retValue = IMessagingCallbackWarning.Unknown;
+            if (object != null && object.value != null && IMessagingCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IMessagingCallbackWarning[object.value];
             }
-            else {
-                return IMessagingCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IMessagingCallbackWarning} [UnableToSentAll='UnableToSentAll']
@@ -20648,39 +17861,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.INetworkReachabilityCallbackError}
         */
         INetworkReachabilityCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Forbidden":
-                        return INetworkReachabilityCallbackError.Forbidden;
-                    case "NotFound":
-                        return INetworkReachabilityCallbackError.NotFound;
-                    case "MethodNotAllowed":
-                        return INetworkReachabilityCallbackError.MethodNotAllowed;
-                    case "NotAllowed":
-                        return INetworkReachabilityCallbackError.NotAllowed;
-                    case "NotAuthenticated":
-                        return INetworkReachabilityCallbackError.NotAuthenticated;
-                    case "TimeOut":
-                        return INetworkReachabilityCallbackError.TimeOut;
-                    case "NoResponse":
-                        return INetworkReachabilityCallbackError.NoResponse;
-                    case "Unreachable":
-                        return INetworkReachabilityCallbackError.Unreachable;
-                    case "Wrong_Params":
-                        return INetworkReachabilityCallbackError.Wrong_Params;
-                    case "MalformedUrl":
-                        return INetworkReachabilityCallbackError.MalformedUrl;
-                    case "DomainUnresolvable":
-                        return INetworkReachabilityCallbackError.DomainUnresolvable;
-                    case "Unknown":
-                        return INetworkReachabilityCallbackError.Unknown;
-                    default:
-                        return INetworkReachabilityCallbackError.Unknown;
-                }
+            var retValue = INetworkReachabilityCallbackError.Unknown;
+            if (object != null && object.value != null && INetworkReachabilityCallbackError.hasOwnProperty(object.value)) {
+                retValue = INetworkReachabilityCallbackError[object.value];
             }
-            else {
-                return INetworkReachabilityCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.INetworkReachabilityCallbackError} [Forbidden='Forbidden']
@@ -20715,9 +17900,9 @@ of the device. For device orientation, use the IDevice APIs.
         */
         INetworkReachabilityCallbackError.Unreachable = new INetworkReachabilityCallbackError("Unreachable");
         /**
-           @property {Adaptive.INetworkReachabilityCallbackError} [Wrong_Params='Wrong_Params']
+           @property {Adaptive.INetworkReachabilityCallbackError} [WrongParams='WrongParams']
         */
-        INetworkReachabilityCallbackError.Wrong_Params = new INetworkReachabilityCallbackError("Wrong_Params");
+        INetworkReachabilityCallbackError.WrongParams = new INetworkReachabilityCallbackError("WrongParams");
         /**
            @property {Adaptive.INetworkReachabilityCallbackError} [MalformedUrl='MalformedUrl']
         */
@@ -20751,27 +17936,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.INetworkReachabilityCallbackWarning}
         */
         INetworkReachabilityCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "IncorrectScheme":
-                        return INetworkReachabilityCallbackWarning.IncorrectScheme;
-                    case "NotSecure":
-                        return INetworkReachabilityCallbackWarning.NotSecure;
-                    case "NotTrusted":
-                        return INetworkReachabilityCallbackWarning.NotTrusted;
-                    case "Redirected":
-                        return INetworkReachabilityCallbackWarning.Redirected;
-                    case "NotRegisteredService":
-                        return INetworkReachabilityCallbackWarning.NotRegisteredService;
-                    case "Unknown":
-                        return INetworkReachabilityCallbackWarning.Unknown;
-                    default:
-                        return INetworkReachabilityCallbackWarning.Unknown;
-                }
+            var retValue = INetworkReachabilityCallbackWarning.Unknown;
+            if (object != null && object.value != null && INetworkReachabilityCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = INetworkReachabilityCallbackWarning[object.value];
             }
-            else {
-                return INetworkReachabilityCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.INetworkReachabilityCallbackWarning} [IncorrectScheme='IncorrectScheme']
@@ -20818,21 +17987,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.INetworkStatusListenerError}
         */
         INetworkStatusListenerError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "NoPermission":
-                        return INetworkStatusListenerError.NoPermission;
-                    case "Unreachable":
-                        return INetworkStatusListenerError.Unreachable;
-                    case "Unknown":
-                        return INetworkStatusListenerError.Unknown;
-                    default:
-                        return INetworkStatusListenerError.Unknown;
-                }
+            var retValue = INetworkStatusListenerError.Unknown;
+            if (object != null && object.value != null && INetworkStatusListenerError.hasOwnProperty(object.value)) {
+                retValue = INetworkStatusListenerError[object.value];
             }
-            else {
-                return INetworkStatusListenerError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.INetworkStatusListenerError} [NoPermission='NoPermission']
@@ -20867,21 +18026,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.INetworkStatusListenerWarning}
         */
         INetworkStatusListenerWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "IpAddressNotAssigned":
-                        return INetworkStatusListenerWarning.IpAddressNotAssigned;
-                    case "IpAddressChanged":
-                        return INetworkStatusListenerWarning.IpAddressChanged;
-                    case "Unknown":
-                        return INetworkStatusListenerWarning.Unknown;
-                    default:
-                        return INetworkStatusListenerWarning.Unknown;
-                }
+            var retValue = INetworkStatusListenerWarning.Unknown;
+            if (object != null && object.value != null && INetworkStatusListenerWarning.hasOwnProperty(object.value)) {
+                retValue = INetworkStatusListenerWarning[object.value];
             }
-            else {
-                return INetworkStatusListenerWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.INetworkStatusListenerWarning} [IpAddressNotAssigned='IpAddressNotAssigned']
@@ -20916,39 +18065,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IOSType}
         */
         IOSType.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "iOS":
-                        return IOSType.iOS;
-                    case "OSX":
-                        return IOSType.OSX;
-                    case "Windows":
-                        return IOSType.Windows;
-                    case "WindowsPhone":
-                        return IOSType.WindowsPhone;
-                    case "Android":
-                        return IOSType.Android;
-                    case "Linux":
-                        return IOSType.Linux;
-                    case "Blackberry":
-                        return IOSType.Blackberry;
-                    case "Tizen":
-                        return IOSType.Tizen;
-                    case "FirefoxOS":
-                        return IOSType.FirefoxOS;
-                    case "Chromium":
-                        return IOSType.Chromium;
-                    case "Unspecified":
-                        return IOSType.Unspecified;
-                    case "Unknown":
-                        return IOSType.Unknown;
-                    default:
-                        return IOSType.Unknown;
-                }
+            var retValue = IOSType.Unknown;
+            if (object != null && object.value != null && IOSType.hasOwnProperty(object.value)) {
+                retValue = IOSType[object.value];
             }
-            else {
-                return IOSType.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IOSType} [iOS='iOS']
@@ -21019,21 +18140,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ISecurityResultCallbackError}
         */
         ISecurityResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "NoPermission":
-                        return ISecurityResultCallbackError.NoPermission;
-                    case "NoMatchesFound":
-                        return ISecurityResultCallbackError.NoMatchesFound;
-                    case "Unknown":
-                        return ISecurityResultCallbackError.Unknown;
-                    default:
-                        return ISecurityResultCallbackError.Unknown;
-                }
+            var retValue = ISecurityResultCallbackError.Unknown;
+            if (object != null && object.value != null && ISecurityResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = ISecurityResultCallbackError[object.value];
             }
-            else {
-                return ISecurityResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ISecurityResultCallbackError} [NoPermission='NoPermission']
@@ -21068,19 +18179,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ISecurityResultCallbackWarning}
         */
         ISecurityResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "EntryOverride":
-                        return ISecurityResultCallbackWarning.EntryOverride;
-                    case "Unknown":
-                        return ISecurityResultCallbackWarning.Unknown;
-                    default:
-                        return ISecurityResultCallbackWarning.Unknown;
-                }
+            var retValue = ISecurityResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && ISecurityResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = ISecurityResultCallbackWarning[object.value];
             }
-            else {
-                return ISecurityResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ISecurityResultCallbackWarning} [EntryOverride='EntryOverride']
@@ -21111,25 +18214,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IServiceCertificateValidation}
         */
         IServiceCertificateValidation.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "None":
-                        return IServiceCertificateValidation.None;
-                    case "Normal":
-                        return IServiceCertificateValidation.Normal;
-                    case "Extended":
-                        return IServiceCertificateValidation.Extended;
-                    case "Extreme":
-                        return IServiceCertificateValidation.Extreme;
-                    case "Unknown":
-                        return IServiceCertificateValidation.Unknown;
-                    default:
-                        return IServiceCertificateValidation.Unknown;
-                }
+            var retValue = IServiceCertificateValidation.Unknown;
+            if (object != null && object.value != null && IServiceCertificateValidation.hasOwnProperty(object.value)) {
+                retValue = IServiceCertificateValidation[object.value];
             }
-            else {
-                return IServiceCertificateValidation.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IServiceCertificateValidation} [None='None']
@@ -21172,38 +18261,24 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IServiceContentEncoding}
         */
         IServiceContentEncoding.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "ASCII":
-                        return IServiceContentEncoding.ASCII;
-                    case "UTF8":
-                        return IServiceContentEncoding.UTF8;
-                    case "ISOLatin1":
-                        return IServiceContentEncoding.ISOLatin1;
-                    case "Unicode":
-                        return IServiceContentEncoding.Unicode;
-                    case "Unknown":
-                        return IServiceContentEncoding.Unknown;
-                    default:
-                        return IServiceContentEncoding.Unknown;
-                }
+            var retValue = IServiceContentEncoding.Unknown;
+            if (object != null && object.value != null && IServiceContentEncoding.hasOwnProperty(object.value)) {
+                retValue = IServiceContentEncoding[object.value];
             }
-            else {
-                return IServiceContentEncoding.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.IServiceContentEncoding} [ASCII='ASCII']
+           @property {Adaptive.IServiceContentEncoding} [Ascii='Ascii']
         */
-        IServiceContentEncoding.ASCII = new IServiceContentEncoding("ASCII");
+        IServiceContentEncoding.Ascii = new IServiceContentEncoding("Ascii");
         /**
-           @property {Adaptive.IServiceContentEncoding} [UTF8='UTF8']
+           @property {Adaptive.IServiceContentEncoding} [Utf8='Utf8']
         */
-        IServiceContentEncoding.UTF8 = new IServiceContentEncoding("UTF8");
+        IServiceContentEncoding.Utf8 = new IServiceContentEncoding("Utf8");
         /**
-           @property {Adaptive.IServiceContentEncoding} [ISOLatin1='ISOLatin1']
+           @property {Adaptive.IServiceContentEncoding} [IsoLatin1='IsoLatin1']
         */
-        IServiceContentEncoding.ISOLatin1 = new IServiceContentEncoding("ISOLatin1");
+        IServiceContentEncoding.IsoLatin1 = new IServiceContentEncoding("IsoLatin1");
         /**
            @property {Adaptive.IServiceContentEncoding} [Unicode='Unicode']
         */
@@ -21233,36 +18308,24 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IServiceMethod}
         */
         IServiceMethod.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "POST":
-                        return IServiceMethod.POST;
-                    case "GET":
-                        return IServiceMethod.GET;
-                    case "HEAD":
-                        return IServiceMethod.HEAD;
-                    case "Unknown":
-                        return IServiceMethod.Unknown;
-                    default:
-                        return IServiceMethod.Unknown;
-                }
+            var retValue = IServiceMethod.Unknown;
+            if (object != null && object.value != null && IServiceMethod.hasOwnProperty(object.value)) {
+                retValue = IServiceMethod[object.value];
             }
-            else {
-                return IServiceMethod.Unknown;
-            }
+            return retValue;
         };
         /**
-           @property {Adaptive.IServiceMethod} [POST='POST']
+           @property {Adaptive.IServiceMethod} [Post='Post']
         */
-        IServiceMethod.POST = new IServiceMethod("POST");
+        IServiceMethod.Post = new IServiceMethod("Post");
         /**
-           @property {Adaptive.IServiceMethod} [GET='GET']
+           @property {Adaptive.IServiceMethod} [Get='Get']
         */
-        IServiceMethod.GET = new IServiceMethod("GET");
+        IServiceMethod.Get = new IServiceMethod("Get");
         /**
-           @property {Adaptive.IServiceMethod} [HEAD='HEAD']
+           @property {Adaptive.IServiceMethod} [Head='Head']
         */
-        IServiceMethod.HEAD = new IServiceMethod("HEAD");
+        IServiceMethod.Head = new IServiceMethod("Head");
         /**
            @property {Adaptive.IServiceMethod} [Unknown='Unknown']
         */
@@ -21288,25 +18351,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IServiceType}
         */
         IServiceType.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "OctetBinary":
-                        return IServiceType.OctetBinary;
-                    case "RestJson":
-                        return IServiceType.RestJson;
-                    case "RestXml":
-                        return IServiceType.RestXml;
-                    case "SoapXml":
-                        return IServiceType.SoapXml;
-                    case "Unknown":
-                        return IServiceType.Unknown;
-                    default:
-                        return IServiceType.Unknown;
-                }
+            var retValue = IServiceType.Unknown;
+            if (object != null && object.value != null && IServiceType.hasOwnProperty(object.value)) {
+                retValue = IServiceType[object.value];
             }
-            else {
-                return IServiceType.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IServiceType} [OctetBinary='OctetBinary']
@@ -21349,27 +18398,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IServiceResultCallbackError}
         */
         IServiceResultCallbackError.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "TimeOut":
-                        return IServiceResultCallbackError.TimeOut;
-                    case "NoResponse":
-                        return IServiceResultCallbackError.NoResponse;
-                    case "Unreachable":
-                        return IServiceResultCallbackError.Unreachable;
-                    case "MalformedUrl":
-                        return IServiceResultCallbackError.MalformedUrl;
-                    case "NotRegisteredService":
-                        return IServiceResultCallbackError.NotRegisteredService;
-                    case "Unknown":
-                        return IServiceResultCallbackError.Unknown;
-                    default:
-                        return IServiceResultCallbackError.Unknown;
-                }
+            var retValue = IServiceResultCallbackError.Unknown;
+            if (object != null && object.value != null && IServiceResultCallbackError.hasOwnProperty(object.value)) {
+                retValue = IServiceResultCallbackError[object.value];
             }
-            else {
-                return IServiceResultCallbackError.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IServiceResultCallbackError} [TimeOut='TimeOut']
@@ -21416,39 +18449,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.IServiceResultCallbackWarning}
         */
         IServiceResultCallbackWarning.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "CertificateUntrusted":
-                        return IServiceResultCallbackWarning.CertificateUntrusted;
-                    case "NotSecure":
-                        return IServiceResultCallbackWarning.NotSecure;
-                    case "Redirected":
-                        return IServiceResultCallbackWarning.Redirected;
-                    case "Wrong_Params":
-                        return IServiceResultCallbackWarning.Wrong_Params;
-                    case "Forbidden":
-                        return IServiceResultCallbackWarning.Forbidden;
-                    case "NotFound":
-                        return IServiceResultCallbackWarning.NotFound;
-                    case "MethodNotAllowed":
-                        return IServiceResultCallbackWarning.MethodNotAllowed;
-                    case "NotAllowed":
-                        return IServiceResultCallbackWarning.NotAllowed;
-                    case "NotAuthenticated":
-                        return IServiceResultCallbackWarning.NotAuthenticated;
-                    case "PaymentRequired":
-                        return IServiceResultCallbackWarning.PaymentRequired;
-                    case "ServerError":
-                        return IServiceResultCallbackWarning.ServerError;
-                    case "Unknown":
-                        return IServiceResultCallbackWarning.Unknown;
-                    default:
-                        return IServiceResultCallbackWarning.Unknown;
-                }
+            var retValue = IServiceResultCallbackWarning.Unknown;
+            if (object != null && object.value != null && IServiceResultCallbackWarning.hasOwnProperty(object.value)) {
+                retValue = IServiceResultCallbackWarning[object.value];
             }
-            else {
-                return IServiceResultCallbackWarning.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.IServiceResultCallbackWarning} [CertificateUntrusted='CertificateUntrusted']
@@ -21463,9 +18468,9 @@ of the device. For device orientation, use the IDevice APIs.
         */
         IServiceResultCallbackWarning.Redirected = new IServiceResultCallbackWarning("Redirected");
         /**
-           @property {Adaptive.IServiceResultCallbackWarning} [Wrong_Params='Wrong_Params']
+           @property {Adaptive.IServiceResultCallbackWarning} [WrongParams='WrongParams']
         */
-        IServiceResultCallbackWarning.Wrong_Params = new IServiceResultCallbackWarning("Wrong_Params");
+        IServiceResultCallbackWarning.WrongParams = new IServiceResultCallbackWarning("WrongParams");
         /**
            @property {Adaptive.IServiceResultCallbackWarning} [Forbidden='Forbidden']
         */
@@ -21519,21 +18524,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.ITelephonyStatus}
         */
         ITelephonyStatus.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Dialing":
-                        return ITelephonyStatus.Dialing;
-                    case "Failed":
-                        return ITelephonyStatus.Failed;
-                    case "Unknown":
-                        return ITelephonyStatus.Unknown;
-                    default:
-                        return ITelephonyStatus.Unknown;
-                }
+            var retValue = ITelephonyStatus.Unknown;
+            if (object != null && object.value != null && ITelephonyStatus.hasOwnProperty(object.value)) {
+                retValue = ITelephonyStatus[object.value];
             }
-            else {
-                return ITelephonyStatus.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.ITelephonyStatus} [Dialing='Dialing']
@@ -21568,33 +18563,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.LifecycleState}
         */
         LifecycleState.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "Starting":
-                        return LifecycleState.Starting;
-                    case "Started":
-                        return LifecycleState.Started;
-                    case "Running":
-                        return LifecycleState.Running;
-                    case "Pausing":
-                        return LifecycleState.Pausing;
-                    case "PausedIdle":
-                        return LifecycleState.PausedIdle;
-                    case "PausedRun":
-                        return LifecycleState.PausedRun;
-                    case "Resuming":
-                        return LifecycleState.Resuming;
-                    case "Stopping":
-                        return LifecycleState.Stopping;
-                    case "Unknown":
-                        return LifecycleState.Unknown;
-                    default:
-                        return LifecycleState.Unknown;
-                }
+            var retValue = LifecycleState.Unknown;
+            if (object != null && object.value != null && LifecycleState.hasOwnProperty(object.value)) {
+                retValue = LifecycleState[object.value];
             }
-            else {
-                return LifecycleState.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.LifecycleState} [Starting='Starting']
@@ -21653,23 +18626,11 @@ of the device. For device orientation, use the IDevice APIs.
            @return {Adaptive.RotationEventState}
         */
         RotationEventState.toObject = function (object) {
-            if (object != null && object.value != null) {
-                switch (object.value) {
-                    case "WillStartRotation":
-                        return RotationEventState.WillStartRotation;
-                    case "IsRotating":
-                        return RotationEventState.IsRotating;
-                    case "DidFinishRotation":
-                        return RotationEventState.DidFinishRotation;
-                    case "Unknown":
-                        return RotationEventState.Unknown;
-                    default:
-                        return RotationEventState.Unknown;
-                }
+            var retValue = RotationEventState.Unknown;
+            if (object != null && object.value != null && RotationEventState.hasOwnProperty(object.value)) {
+                retValue = RotationEventState[object.value];
             }
-            else {
-                return RotationEventState.Unknown;
-            }
+            return retValue;
         };
         /**
            @property {Adaptive.RotationEventState} [WillStartRotation='WillStartRotation']
@@ -21691,4 +18652,7 @@ of the device. For device orientation, use the IDevice APIs.
     })();
     Adaptive.RotationEventState = RotationEventState;
 })(Adaptive || (Adaptive = {}));
+/**
+------------------------------------| Engineered with ♥ in Barcelona, Catalonia |--------------------------------------
+*/
 //# sourceMappingURL=Adaptive.js.map
