@@ -1,7 +1,7 @@
 # Adaptive App Manager for Bower 
 [![Build Status](https://travis-ci.org/AdaptiveMe/bower-adaptiveme.svg?branch=master)](https://travis-ci.org/AdaptiveMe/bower-adaptiveme) [![Codacy Badge](https://www.codacy.com/project/badge/41c1f612d1c3475eafc1343994706fb1)](https://www.codacy.com/public/carlos/bower-adaptiveme) [![GitHub tag](https://img.shields.io/github/tag/AdaptiveMe/bower-adaptiveme.svg)](https://github.com/AdaptiveMe/bower-adaptiveme) 
 [![License](https://img.shields.io/badge/license-apache%202-blue.svg)](https://raw.githubusercontent.com/AdaptiveMe/adaptive-arp-api/master/LICENSE) 
-[![Adaptive Manager for Bower](https://img.shields.io/badge/arp-bower-yellow.svg)](https://github.com/AdaptiveMe/bower-adaptiveme)
+[![Adaptive Manager for Bower](https://img.shields.io/badge/devtools-bower-yellow.svg)](https://github.com/AdaptiveMe/bower-adaptiveme)
 [![adaptive.me](https://img.shields.io/badge/adaptive-me-fdcb0e.svg)](http://adaptive.me)
 [![Adaptive Runtime Platform](https://raw.githubusercontent.com/AdaptiveMe/AdaptiveMe.github.io/master/assets/logos/transparent/Logo-devtools-for-Bower.png)](#)
 
