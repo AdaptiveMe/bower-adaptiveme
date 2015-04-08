@@ -26,6 +26,7 @@ after_success: |-
     export API_TAG=`git describe --abbrev=0`
     export API_TAG=`echo ${API_TAG//[v]/ }`
     rm -Rf $SOURCE_HOME/temp
+    cd $SOURCE_HOME
     git remote set-url origin https://github.com/AdaptiveMe/bower-adaptiveme.git
     if [ "$GIT_TAG" != "$API_TAG" ]; then
         git tag -a "${API_TAG}" -m "API Specification ${API_TAG}"
