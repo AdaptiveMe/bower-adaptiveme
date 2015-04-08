@@ -1,8 +1,39 @@
+sudo: false
 language: node_js
 node_js:
 - '0.12'
+before_script:
+- export HOME=`pwd`
+- export TIMESTAMP=`date`
+- export GIT_TAG=`git describe --abbrev=0`
+- mkdir -p .git
+- git config --global credential.helper "store --file=$HOME/.git/credentials"
+- git config --global user.email "carlos@adaptive.me"
+- git config --global user.name "carloslozano"
+- git config --global push.default simple
+- echo "https://${GH_TOKEN}:@github.com" > $HOME/.git/credentials
 script:
 - node adaptive.js
+after_success: |-
+  if [ "$TRAVIS_BRANCH" == "$TRAVIS_TAG" ] && [ "$TRAVIS_PULL_REQUEST" == "false" ]; then
+    echo Tagged version.
+  elif [ "$TRAVIS_PULL_REQUEST" == "false" ]; then
+    export SOURCE_HOME=`pwd`
+    mkdir -p temp
+    cd temp
+    git clone https://github.com/AdaptiveMe/adaptive-arp-api.git
+    cd adaptive-arp-api
+    export API_TAG=`git describe --abbrev=0`
+    export API_TAG=`echo ${API_TAG//[v]/ }`
+    rm -Rf $SOURCE_HOME/temp
+    git remote set-url origin https://github.com/AdaptiveMe/bower-adaptiveme.git
+    if [ "$GIT_TAG" != "$API_TAG" ]; then
+        git tag -a "${API_TAG}" -m "API Specification ${API_TAG}"
+        git push origin HEAD:master --tags
+    fi
+  fi
+after_failure:
+- echo "Having a bad moment..."
 env:
   global:
     secure: E7832vIQrs0ILC67BSsPsDVGfDE9kKxHA7hUv3vbi5r7bNy6AnWBDg9Lk/BQpYQGhvV4jFgQ4ex4tmpi31HhUGxISC7qn2BOX1Ivlb9apm34nTSfhf+pfHPVzXTN+wSbKWi0irt4RjyoOjQWN3/by4zoJIu//dT/rSZJRrQYnNo=
