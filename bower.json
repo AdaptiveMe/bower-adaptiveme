@@ -27,12 +27,9 @@
   },
   "ignore": [
     "/.*",
-    ".DS_Store",
-    ".git",
-    ".gitignore",
-    ".editorconfig",
-    "README.md",
-    "bower.json",
-    ".travis.yml"
+	"test/",
+    "Gruntfile.js",
+    "package.json",
+    "README.md"
   ]
 }
