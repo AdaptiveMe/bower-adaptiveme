@@ -16,7 +16,7 @@ Bower Adaptive is a set of definitions and implementation files that allow you t
 
 #### Prerequisites
 
-* You should [**NodeJS**]((https://nodejs.org)) installed on your machine before proceeding with the installation. If you don't have it, please download it from [here](https://nodejs.org/download/) for your platform. 
+* You should [**NodeJS**](https://nodejs.org) installed on your machine before proceeding with the installation. If you don't have it, please download it from [here](https://nodejs.org/download/) for your platform. 
 	* If you don't know whether you have it installed, open up a ```terminal```or ```cmd prompt``` and issue the following command ```node -v```.
 	* The above command should respond with at least the following NodeJS version ```v0.12.0```.
 * It's highly recommended to have installed [**Typescript**](http://www.typescriptlang.org/) to use all the power of the Adaptive Javascript Library. To install typescript you could run: 
@@ -45,7 +45,7 @@ There are some files included in the project, This are the main important files:
 
 To include the adaptive javascript libraries into your project:
 
-1. Create, if you haven't yet a **bower.json file** and include this line:
+1. Create, if you haven't yet a **bower.json** file and include the **adaptiveme** dependency to the bower dependencies:
 
     ```json
     {
@@ -57,12 +57,12 @@ To include the adaptive javascript libraries into your project:
     }
     ```
 2. Run ```bower install``` to download your dependencies. This process will download the library files for the version you have specified in the bower.json file.
-3. Include in your html file the reference to the library:
+3. Include in your html file **(index.html)** the reference to the library:
 
     ```html
     <script src="bower_components/adaptiveme/adaptive.js"></script>
     ```
-4. Create a typescript file and include the reference to the definitions file
+4. Create a typescript file **(main.ts)** and include the reference to the definitions file
 
     ```javascript
     /// <reference path="bower_components/adaptiveme/adaptive.d.ts" />
@@ -70,7 +70,7 @@ To include the adaptive javascript libraries into your project:
     document.getElementById("version").innerHTML = version;
     ```
 5. Run ```tsc main.ts``` to generate the javascript file from the typescript. This step could be done manually or you can use some of the typescript watchers provided by the different IDEs.
-6. Include the reference to the new javascript created by typescript in your index.html
+6. Include the reference to the new javascript created by typescript in your html file **(index.html)**
 
     ```html
     ...
@@ -80,7 +80,7 @@ To include the adaptive javascript libraries into your project:
     <script src="main.js"></script>
     </body>
     ```
-7. Open the index.html file in your browser
+7. Open the **index.html** file in your browser
 
 ### About Adaptive Runtime Platform
 
