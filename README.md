@@ -1,4 +1,4 @@
-# AdaptiveMe Javascript Lybraries
+# AdaptiveMe Bower Dependencies
 [![Build Status](https://travis-ci.org/AdaptiveMe/bower-adaptiveme.svg?branch=master)](https://travis-ci.org/AdaptiveMe/bower-adaptiveme) 
 [![Codacy Badge](https://www.codacy.com/project/badge/41c1f612d1c3475eafc1343994706fb1)](https://www.codacy.com/public/carlos/bower-adaptiveme) 
 [![GitHub tag](https://img.shields.io/github/tag/AdaptiveMe/bower-adaptiveme.svg)](https://github.com/AdaptiveMe/bower-adaptiveme) 
