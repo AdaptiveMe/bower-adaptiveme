@@ -1,0 +1,7 @@
+{
+  "name": "example",
+  "description": "example",
+  "dependencies": {
+    "adaptiveme": "latest"
+  }
+}
