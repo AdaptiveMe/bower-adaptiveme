@@ -19,10 +19,7 @@ Bower Adaptive is a set of definitions and implementation files that allow you t
 * You should [**NodeJS**]((https://nodejs.org)) installed on your machine before proceeding with the installation. If you don't have it, please download it from [here](https://nodejs.org/download/) for your platform. 
 	* If you don't know whether you have it installed, open up a ```terminal```or ```cmd prompt``` and issue the following command ```node -v```.
 	* The above command should respond with at least the following NodeJS version ```v0.12.0```.
-* It's highly recommended to have installed [**Typescript**](http://www.typescriptlang.org/) to use all the power of the Adaptive Javascript Library. To install typescript you could run:
-    ```
-    npm install -g typescript
-    ```
+* It's highly recommended to have installed [**Typescript**](http://www.typescriptlang.org/) to use all the power of the Adaptive Javascript Library. To install typescript you could run: ```npm install -g typescript```
     * Type ```tsc -v``` to check that you have installed typescript correctly.
 
 #### Installation
@@ -52,32 +49,31 @@ To include the adaptive javascript libraries into your project:
       "name": "test",
       "description": "test",
       "dependencies": {
-        ...
-        "adaptiveme": "2.2.11"
+        "adaptiveme": "latest"
       }
     }
     ```
 2. Run ```bower install``` to download your dependencies. This process will download the library files for the version you have specified in the bower.json file.
 3. Include in your html file the reference to the library:
-    ```json
-    <script src="bower_components/adaptiveme/adaptive.js"></script>
-    ```
+```html
+<script src="bower_components/adaptiveme/adaptive.js"></script>
+```
 4. Create a typescript file and include the reference to the definitions file
-    ```json
-    /// <reference path="bower_components/adaptiveme/adaptive.d.ts" />
-    var version = Adaptive.AppRegistryBridge.getInstance().getAPIVersion();
-    document.getElementById("version").innerHTML = version;
-    ```
+```json
+/// <reference path="bower_components/adaptiveme/adaptive.d.ts" />
+var version = Adaptive.AppRegistryBridge.getInstance().getAPIVersion();
+document.getElementById("version").innerHTML = version;
+```
 5. Run ```tsc main.ts``` to generate the javascript file from the typescript. This step could be done manually or you can use some of the typescript watchers provided by the different IDEs.
 6. Include the reference to the new javascript created by typescript in your index.html
-    ```json
-    ...
-    <body>
-        <span id="version"></span>
-        <script src="bower_components/adaptiveme/adaptive.js"></script>
-        <script src="main.js"></script>
-    </body>
-    ```
+```html
+...
+<body>
+<span id="version"></span>
+<script src="bower_components/adaptiveme/adaptive.js"></script>
+<script src="main.js"></script>
+</body>
+```
 7. Open the index.html file in your browser
 
 ### About Adaptive Runtime Platform
