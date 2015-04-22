@@ -1,5 +1,8 @@
-# Adaptive App Manager for Bower 
-[![Build Status](https://travis-ci.org/AdaptiveMe/bower-adaptiveme.svg?branch=master)](https://travis-ci.org/AdaptiveMe/bower-adaptiveme) [![Codacy Badge](https://www.codacy.com/project/badge/41c1f612d1c3475eafc1343994706fb1)](https://www.codacy.com/public/carlos/bower-adaptiveme) [![GitHub tag](https://img.shields.io/github/tag/AdaptiveMe/bower-adaptiveme.svg)](https://github.com/AdaptiveMe/bower-adaptiveme) 
+# AdaptiveMe Javascript Lybraries
+[![Build Status](https://travis-ci.org/AdaptiveMe/bower-adaptiveme.svg?branch=master)](https://travis-ci.org/AdaptiveMe/bower-adaptiveme) 
+[![Codacy Badge](https://www.codacy.com/project/badge/41c1f612d1c3475eafc1343994706fb1)](https://www.codacy.com/public/carlos/bower-adaptiveme) 
+[![GitHub tag](https://img.shields.io/github/tag/AdaptiveMe/bower-adaptiveme.svg)](https://github.com/AdaptiveMe/bower-adaptiveme) 
+[![Bower](https://img.shields.io/bower/v/adaptiveme.svg)](https://travis-ci.org/AdaptiveMe/bower-adaptiveme)
 [![License](https://img.shields.io/badge/license-apache%202-blue.svg)](https://raw.githubusercontent.com/AdaptiveMe/adaptive-arp-api/master/LICENSE) 
 [![Adaptive Manager for Bower](https://img.shields.io/badge/devtools-bower-yellow.svg)](https://github.com/AdaptiveMe/bower-adaptiveme)
 [![adaptive.me](https://img.shields.io/badge/adaptive-me-fdcb0e.svg)](http://adaptive.me)
@@ -9,7 +12,73 @@
 
 ### About This Project
 
-Todo :smile:
+Bower Adaptive is a set of definitions and implementation files that allow you to interact between an HTML5 application and the Adaptive Native Core (Darwin, Android and Windows). The Typescript/Javascript layer defines a unique middleware layer for all the native paltforms and HTML5 frameworks. This libraries are distributed throught [Bower](http://bower.io/search/?q=adaptiveme), in order to include easily in your HTML5 project.  
+
+#### Prerequisites
+
+* You should [**NodeJS**]((https://nodejs.org)) installed on your machine before proceeding with the installation. If you don't have it, please download it from [here](https://nodejs.org/download/) for your platform. 
+	* If you don't know whether you have it installed, open up a ```terminal```or ```cmd prompt``` and issue the following command ```node -v```.
+	* The above command should respond with at least the following NodeJS version ```v0.12.0```.
+* It's highly recommended to have installed [**Typescript**](http://www.typescriptlang.org/) to use all the power of the Adaptive Javascript Library. To install typescript you could run:
+    ```
+    npm install -g typescript
+    ```
+    * Type ```tsc -v``` to check that you have installed typescript correctly.
+
+#### Installation
+
+[**Bower**](http://bower.io/) it's a command line utility and you could install it with npm:
+```
+npm install -g bower
+```
+Type ```bower -v``` to check that you have installed typescript correctly.
+
+#### What's included?
+
+There are some files included in the project, This are the main important files:
+
+- **adaptive.js**: Library file, this file includes all the variables and functions to comunicate your application to the Native Platform.
+- **adaptive.d.ts**: Typescript Declarations File. If you want to develop in Typescript you could include this definitions file to call easily the methods and functions from typescript.
+- **adaptive.js.map**: Javascript Source Map. This dile allow you to debug code in production after the uglify process. Normally this is used by the DevTools of the browsers.
+
+#### Usage
+
+To include the adaptive javascript libraries into your project:
+
+1. Create, if you haven't yet a **bower.json file** and include this line:
+
+    ```json
+    {
+      "name": "test",
+      "description": "test",
+      "dependencies": {
+        ...
+        "adaptiveme": "2.2.11"
+      }
+    }
+    ```
+2. Run ```bower install``` to download your dependencies. This process will download the library files for the version you have specified in the bower.json file.
+3. Include in your html file the reference to the library:
+    ```json
+    <script src="bower_components/adaptiveme/adaptive.js"></script>
+    ```
+4. Create a typescript file and include the reference to the definitions file
+    ```json
+    /// <reference path="bower_components/adaptiveme/adaptive.d.ts" />
+    var version = Adaptive.AppRegistryBridge.getInstance().getAPIVersion();
+    document.getElementById("version").innerHTML = version;
+    ```
+5. Run ```tsc main.ts``` to generate the javascript file from the typescript. This step could be done manually or you can use some of the typescript watchers provided by the different IDEs.
+6. Include the reference to the new javascript created by typescript in your index.html
+    ```json
+    ...
+    <body>
+        <span id="version"></span>
+        <script src="bower_components/adaptiveme/adaptive.js"></script>
+        <script src="main.js"></script>
+    </body>
+    ```
+7. Open the index.html file in your browser
 
 ### About Adaptive Runtime Platform
 
