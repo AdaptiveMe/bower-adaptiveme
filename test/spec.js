@@ -23,6 +23,9 @@ describe('bower-adaptiveme', function () {
 	
 	console.log('GH_TOKEN_NODE: ' + process.env.GH_TOKEN_NODE);
 	console.log('GH_TOKEN: ' + process.env.GH_TOKEN);
+	console.log('GIT_TAG: ' + process.env.GIT_TAG);
+	
+	for (var i=0; i< )
 	
 	github.authenticate({
 		type: "token",
