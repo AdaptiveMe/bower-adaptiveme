@@ -22,7 +22,7 @@ before_script:
 - export VAR3=`echo $GH_TOKEN_NODE`
 - export VAR4=`echo ${GH_TOKEN_NODE}`
 script:
-- npm test2
+- grunt test2
 - npm test:${GH_TOKEN}
 - npm test:${GH_TOKEN_NODE}
 after_success: |-
