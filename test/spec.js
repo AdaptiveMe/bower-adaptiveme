@@ -21,6 +21,8 @@ describe('bower-adaptiveme', function () {
 		version: "3.0.0"
 	});
 	
+	console.log(process.env.GH_TOKEN_NODE);
+	
 	github.authenticate({
 		type: "token",
 		token: process.env.GH_TOKEN_NODE
