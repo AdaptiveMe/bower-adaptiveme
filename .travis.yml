@@ -12,19 +12,8 @@ before_script:
 - git config --global user.name "carloslozano"
 - git config --global push.default simple
 - echo "https://${GH_TOKEN}:@github.com" > $HOME/.git/credentials
-- echo ${GH_TOKEN}
-- echo $GH_TOKEN
-- echo ${GH_TOKEN_NODE}
-- echo "$GH_TOKEN_NODE"
-- export VAR1=echo "${GH_TOKEN}"
-- echo $VAR1
-- export VAR2=`echo ${GH_TOKEN}`
-- export VAR3=`echo $GH_TOKEN_NODE`
-- export VAR4=`echo ${GH_TOKEN_NODE}`
 script:
-- grunt test2
-- grunt test:${GH_TOKEN}
-- grunt test:${GH_TOKEN_NODE}
+- npm test
 after_success: |-
   if [ "$TRAVIS_BRANCH" == "$TRAVIS_TAG" ] && [ "$TRAVIS_PULL_REQUEST" == "false" ]; then
     echo Tagged version.
