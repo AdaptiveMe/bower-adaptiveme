@@ -15,10 +15,7 @@ describe('bower-adaptiveme', function () {
    */
   it('Check API version', function (done) {
 	  
-	console.log("TRAVIS_PULL_REQUEST:"+process.env.TRAVIS_PULL_REQUEST);
-	console.log("GH_TOKEN_NODE:"+process.env.GH_TOKEN_NODE);
-	  
-	if (process.env.TRAVIS_PULL_REQUEST) {
+	if (JSON.parse(process.env.TRAVIS_PULL_REQUEST)) {
 		done();
 	} else {
 		var api_version = Adaptive.AppRegistryBridge.getInstance().getAPIVersion();
