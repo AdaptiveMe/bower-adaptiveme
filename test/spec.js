@@ -7,6 +7,10 @@ var fs = require("fs"),
 
 // Load adaptive library into the node context
 vm.runInThisContext(fs.readFileSync('adaptive.js'));
+	
+console.log('GH_TOKEN_NODE: ' + process.env.GH_TOKEN_NODE);
+console.log('GH_TOKEN: ' + process.env.GH_TOKEN);
+console.log('GIT_TAG: ' + process.env.GIT_TAG);
 
 describe('bower-adaptiveme', function () {
 
@@ -24,8 +28,6 @@ describe('bower-adaptiveme', function () {
 	console.log('GH_TOKEN_NODE: ' + process.env.GH_TOKEN_NODE);
 	console.log('GH_TOKEN: ' + process.env.GH_TOKEN);
 	console.log('GIT_TAG: ' + process.env.GIT_TAG);
-	
-	for (var i=0; i< )
 	
 	github.authenticate({
 		type: "token",
