@@ -5,10 +5,12 @@ var fs = require("fs"),
 	GitHubApi = require("github"),
 	expect = require('expect.js');
 	
-var gh_token = process.env.GH_TOKEN_NODE_ECHO
+var gh_token = process.env.GH_TOKEN_NODE
+var gh_token_echo = process.env.GH_TOKEN_NODE_ECHO
 var git_tag = process.env.GIT_TAG
 
 console.log('gh_token:'+gh_token);
+console.log('gh_token_echo:'+gh_token_echo);
 console.log('git_tag:'+git_tag);
 
 // Load adaptive library into the node context
@@ -28,6 +30,7 @@ describe('bower-adaptiveme', function () {
 	});
 	
 	console.log('gh_token:'+gh_token);
+	console.log('gh_token_echo:'+gh_token_echo);
 	console.log('git_tag:'+git_tag);
 	
 	github.authenticate({
