@@ -7,7 +7,7 @@ var fs = require("fs"),
 	
 var gh_token = process.env.GH_TOKEN_NODE
 
-console.log(gh_token);
+console.log('gh_token:'+gh_token);
 
 // Load adaptive library into the node context
 vm.runInThisContext(fs.readFileSync('adaptive.js'));
@@ -25,7 +25,7 @@ describe('bower-adaptiveme', function () {
 		version: "3.0.0"
 	});
 	
-	console.log(gh_token);
+	console.log('gh_token:'+gh_token);
 	
 	github.authenticate({
 		type: "token",

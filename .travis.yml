@@ -6,7 +6,7 @@ before_script:
 - export HOME=`pwd`
 - export TIMESTAMP=`date`
 - export GIT_TAG=`git describe --abbrev=0`
-- export GH_TOKEN_NODE=${GH_TOKEN_NODE}
+- export GH_TOKEN_NODE=`${GH_TOKEN_NODE}`
 - mkdir -p .git
 - git config --global credential.helper "store --file=$HOME/.git/credentials"
 - git config --global user.email "carlos@adaptive.me"
