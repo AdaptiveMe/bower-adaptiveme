@@ -23,7 +23,7 @@ describe('bower-adaptiveme', function () {
 	
 	github.authenticate({
 		type: "token",
-		token: "E7832vIQrs0ILC67BSsPsDVGfDE9kKxHA7hUv3vbi5r7bNy6AnWBDg9Lk/BQpYQGhvV4jFgQ4ex4tmpi31HhUGxISC7qn2BOX1Ivlb9apm34nTSfhf+pfHPVzXTN+wSbKWi0irt4RjyoOjQWN3/by4zoJIu//dT/rSZJRrQYnNo="
+		token: process.env.GH_TOKEN_NODE
 	});
 	
 	github.repos.getTags({
