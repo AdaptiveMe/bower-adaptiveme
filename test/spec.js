@@ -15,34 +15,37 @@ describe('bower-adaptiveme', function () {
    */
   it('Check API version', function (done) {
 	  
+	console.log("TRAVIS_PULL_REQUEST:"+process.env.TRAVIS_PULL_REQUEST);
+	console.log("GH_TOKEN_NODE:"+process.env.GH_TOKEN_NODE);
+	  
 	if (process.env.TRAVIS_PULL_REQUEST) {
 		done();
+	} else {
+		var api_version = Adaptive.AppRegistryBridge.getInstance().getAPIVersion();
+		
+		var github = new GitHubApi({
+			version: "3.0.0"
+		});
+		
+		github.authenticate({
+			type: "token",
+			token: process.env.GH_TOKEN_NODE
+		});
+		
+		github.repos.getTags({
+			user: 'AdaptiveMe',
+			repo: 'adaptive-arp-api',
+			page: 0,
+			per_page: 1
+		}, function(error, result){
+			if (error) {
+				console.log("ERROR: " + error);
+			} else {
+				expect(result[0].name).to.equal(api_version);
+				done();
+			}
+		});
 	}
-
-    var api_version = Adaptive.AppRegistryBridge.getInstance().getAPIVersion();
-	
-	var github = new GitHubApi({
-		version: "3.0.0"
-	});
-	
-	github.authenticate({
-		type: "token",
-		token: process.env.GH_TOKEN_NODE
-	});
-	
-	github.repos.getTags({
-		user: 'AdaptiveMe',
-		repo: 'adaptive-arp-api',
-		page: 0,
-		per_page: 1
-	}, function(error, result){
-		if (error) {
-			console.log("ERROR: " + error);
-		} else {
-			expect(result[0].name).to.equal(api_version);
-			done();
-		}
-	});
   });
 
 });
